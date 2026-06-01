@@ -25,12 +25,6 @@ class Recipe(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
 
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
-
 class RecipeCreate(BaseModel):
     title: str
     description: str
