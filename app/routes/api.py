@@ -32,7 +32,7 @@ def get_recipe(recipe_id: str):
     return recipe
 
 
-@router.post("/recipes")
+@router.post("/recipes", status_code=201)
 def create_recipe(recipe: RecipeCreate):
     """Create a new recipe"""
     new_recipe = recipe_storage.create_recipe(recipe)
@@ -53,8 +53,8 @@ def delete_recipe(recipe_id: str):
     """Delete a recipe"""
     success = recipe_storage.delete_recipe(recipe_id)
     if not success:
-        return {"error": "Recipe not found", "status": "failed"}
-    return {"message": "Recipe deleted successfully", "status": "success"}  # Added status field inconsistently
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return {"message": "Recipe deleted successfully", "status": "success"}
 
 
 @router.post("/recipes/import")
@@ -87,6 +87,9 @@ async def import_recipes(file: UploadFile = File(...)):
     except json.JSONDecodeError as e:
         print(f"JSON error: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON format")
+    except ValueError as e:
+        # Schema validation error from storage
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
