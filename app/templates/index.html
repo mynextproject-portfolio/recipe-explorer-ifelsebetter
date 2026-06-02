@@ -47,7 +47,7 @@
                     <p class="card-text">{{ recipe.description[:100] }}{% if recipe.description|length > 100 %}...{% endif %}</p>
                     <div class="mb-2">
                         <small class="text-muted">
-                            <strong>Difficulty:</strong> <span class="badge bg-{% if recipe.difficulty == 'Easy' %}success{% elif recipe.difficulty == 'Medium' %}warning{% else %}danger{% endif %}">{{ recipe.difficulty }}</span>
+                            <strong>Cuisine:</strong> <span class="badge bg-info">{{ recipe.cuisine }}</span>
                         </small>
                     </div>
                     {% if recipe.tags %}
