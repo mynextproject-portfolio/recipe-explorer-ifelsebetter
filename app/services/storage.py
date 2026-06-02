@@ -53,26 +53,32 @@ class RecipeStorage:
         return False
     
     def import_recipes(self, recipes_data: List[dict]) -> int:
-        # Replace all existing recipes
-        self.recipes.clear()
-        count = 0
+        from pydantic import ValidationError
+        new_recipes = {}
+        errors = []
         
-        for recipe_dict in recipes_data:
+        for i, recipe_dict in enumerate(recipes_data):
             try:
                 # Handle datetime strings if they exist
-                if 'created_at' in recipe_dict:
+                if 'created_at' in recipe_dict and isinstance(recipe_dict['created_at'], str):
                     recipe_dict['created_at'] = datetime.fromisoformat(recipe_dict['created_at'])
-                if 'updated_at' in recipe_dict:
+                if 'updated_at' in recipe_dict and isinstance(recipe_dict['updated_at'], str):
                     recipe_dict['updated_at'] = datetime.fromisoformat(recipe_dict['updated_at'])
                 
                 recipe = Recipe(**recipe_dict)
-                self.recipes[recipe.id] = recipe
-                count += 1
-            except Exception:
-                # Skip invalid recipes
-                continue
-        
-        return count
+                new_recipes[recipe.id] = recipe
+            except ValidationError as e:
+                errors.append(f"Recipe at index {i} failed validation: {e}")
+            except Exception as e:
+                errors.append(f"Recipe at index {i} caused error: {e}")
+                
+        if errors:
+            raise ValueError("Validation failed for one or more recipes:\n" + "\n".join(errors))
+            
+        # Replace all existing recipes
+        self.recipes.clear()
+        self.recipes.update(new_recipes)
+        return len(new_recipes)
 
 
 # Global storage instance (intentionally simple for refactoring)
