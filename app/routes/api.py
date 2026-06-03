@@ -2,10 +2,56 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import json
+import logging
 from app.models import Recipe, RecipeCreate, RecipeUpdate
 from app.services.storage import recipe_storage
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api")
+
+
+@router.get("/recipes/search")
+async def search_recipes_unified(q: Optional[str] = None):
+    """
+    Unified search: combines internal recipes + TheMealDB external results.
+
+    Each recipe includes a 'source' field ('internal' or 'mealdb').
+    If TheMealDB is unavailable, returns only internal results gracefully.
+    """
+    # Internal search
+    if q and q.strip():
+        internal = recipe_storage.search_recipes(q)
+    else:
+        internal = recipe_storage.get_all_recipes()
+
+    # Add source field to internal recipes
+    internal_results = []
+    for recipe in internal:
+        recipe_dict = recipe.model_dump()
+        recipe_dict["source"] = "internal"
+        # Convert datetime fields to ISO string for consistent JSON
+        if "created_at" in recipe_dict and recipe_dict["created_at"]:
+            recipe_dict["created_at"] = recipe_dict["created_at"].isoformat()
+        if "updated_at" in recipe_dict and recipe_dict["updated_at"]:
+            recipe_dict["updated_at"] = recipe_dict["updated_at"].isoformat()
+        internal_results.append(recipe_dict)
+
+    # External search (with graceful fallback)
+    external_results = []
+    if q and q.strip():
+        try:
+            from app.routes.mealdb_routes import get_adapter
+            adapter = get_adapter()
+            external_results = await adapter.search_by_name(q)
+            # External results already have source="mealdb" from the adapter
+        except Exception as exc:
+            logger.warning("External search failed, returning internal only: %s", exc)
+
+    # Combine both result sets — internal first, then external
+    all_results = internal_results + external_results
+
+    return all_results
 
 
 @router.get("/recipes")

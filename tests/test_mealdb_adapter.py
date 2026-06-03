@@ -8,7 +8,6 @@ httpx requests and response fixtures for deterministic tests.
 See test_mealdb_integration.py for the one test that hits the real API.
 """
 import json
-import time
 from pathlib import Path
 
 import httpx
@@ -31,11 +30,10 @@ def fixture_data():
 
 @pytest.fixture
 def adapter():
-    """Create a fresh adapter with a short cache TTL for testing."""
+    """Create a fresh adapter for testing."""
     return MealDBAdapter(
         base_url="https://www.themealdb.com/api/json/v1/1",
         timeout=5.0,
-        cache_ttl=2,  # Short TTL for cache expiry tests
     )
 
 
@@ -248,52 +246,6 @@ class TestSearchByName:
 
         results = await adapter.search_by_name("   ")
         assert results == []
-
-
-# ─── Cache Tests ─────────────────────────────────────────────────────────────
-
-
-class TestCache:
-    """Test the simple TTL cache behavior."""
-
-    @respx.mock
-    @pytest.mark.anyio
-    async def test_cache_returns_cached_results(self, adapter, fixture_data):
-        """Second identical search returns cached data (no second API call)."""
-        route = respx.get("https://www.themealdb.com/api/json/v1/1/search.php").mock(
-            return_value=httpx.Response(200, json=fixture_data)
-        )
-
-        # First call — hits the API
-        results1 = await adapter.search_by_name("arrabiata")
-        assert len(results1) == 1
-        assert route.call_count == 1
-
-        # Second call — should use cache
-        results2 = await adapter.search_by_name("arrabiata")
-        assert len(results2) == 1
-        assert route.call_count == 1  # No additional API call
-
-    @respx.mock
-    @pytest.mark.anyio
-    async def test_cache_expires_after_ttl(self, fixture_data):
-        """Cache expires after TTL, making a fresh API call."""
-        adapter = MealDBAdapter(cache_ttl=1)  # 1 second TTL
-
-        route = respx.get("https://www.themealdb.com/api/json/v1/1/search.php").mock(
-            return_value=httpx.Response(200, json=fixture_data)
-        )
-
-        # First call
-        await adapter.search_by_name("arrabiata")
-        assert route.call_count == 1
-
-        # Wait for cache to expire
-        time.sleep(1.1)
-
-        # Third call — cache expired, hits API again
-        await adapter.search_by_name("arrabiata")
-        assert route.call_count == 2
 
 
 # ─── Lookup Tests ────────────────────────────────────────────────────────────

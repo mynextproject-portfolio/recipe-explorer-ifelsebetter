@@ -14,7 +14,6 @@ Error Handling Strategy:
 """
 import logging
 import re
-import time
 from typing import Optional
 
 import httpx
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 # TheMealDB free tier base URL (no API key needed)
 DEFAULT_BASE_URL = "https://www.themealdb.com/api/json/v1/1"
 DEFAULT_TIMEOUT = 5.0  # seconds
-DEFAULT_CACHE_TTL = 60  # seconds
 
 
 class MealDBAdapter:
@@ -37,28 +35,9 @@ class MealDBAdapter:
         self,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
-        cache_ttl: int = DEFAULT_CACHE_TTL,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.cache_ttl = cache_ttl
-        # Simple TTL cache: {cache_key: (timestamp, data)}
-        self._cache: dict[str, tuple[float, list[dict]]] = {}
-
-    def _get_cached(self, key: str) -> Optional[list[dict]]:
-        """Return cached data if within TTL, else None."""
-        if key in self._cache:
-            cached_time, cached_data = self._cache[key]
-            if time.time() - cached_time < self.cache_ttl:
-                logger.debug("Cache hit for key: %s", key)
-                return cached_data
-            # Expired — remove stale entry
-            del self._cache[key]
-        return None
-
-    def _set_cache(self, key: str, data: list[dict]) -> None:
-        """Store data in cache with current timestamp."""
-        self._cache[key] = (time.time(), data)
 
     async def search_by_name(self, name: str) -> list[dict]:
         """
@@ -69,11 +48,6 @@ class MealDBAdapter:
         """
         if not name or not name.strip():
             return []
-
-        cache_key = f"search:{name.lower().strip()}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -102,9 +76,7 @@ class MealDBAdapter:
             logger.error("TheMealDB returned invalid JSON.")
             return []
 
-        results = self._parse_meals_response(data)
-        self._set_cache(cache_key, results)
-        return results
+        return self._parse_meals_response(data)
 
     async def get_by_id(self, meal_id: str) -> Optional[dict]:
         """
