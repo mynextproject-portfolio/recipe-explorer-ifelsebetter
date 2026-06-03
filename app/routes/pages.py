@@ -2,23 +2,37 @@ from fastapi import APIRouter, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from typing import List, Optional
+import logging
 from app.models import RecipeCreate, RecipeUpdate
 from app.services.storage import recipe_storage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/", response_class=HTMLResponse)
-def home(request: Request, search: Optional[str] = None, message: Optional[str] = None):
-    """Home page with recipe list and search"""
+async def home(request: Request, search: Optional[str] = None, message: Optional[str] = None):
+    """Home page with recipe list and search (internal + external)"""
     if search:
         recipes = recipe_storage.search_recipes(search)
     else:
         recipes = recipe_storage.get_all_recipes()
-    
+
+    # Fetch external results when searching (graceful fallback)
+    external_recipes = []
+    if search and search.strip():
+        try:
+            from app.routes.mealdb_routes import get_adapter
+            adapter = get_adapter()
+            external_recipes = await adapter.search_by_name(search)
+        except Exception as exc:
+            logger.warning("External search failed on home page: %s", exc)
+
     return templates.TemplateResponse(request, "index.html", {
         "recipes": recipes,
+        "external_recipes": external_recipes,
         "search_query": search or "",
         "message": message
     })
