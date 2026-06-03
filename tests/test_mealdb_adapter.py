@@ -52,7 +52,7 @@ class TestTransformMeal:
         assert result["id"] == "mealdb-52771"
         assert result["title"] == "Spicy Arrabiata Penne"
         assert result["cuisine"] == "Italian"
-        assert result["source"] == "mealdb"
+        assert result["source"] == "external"
 
         # Ingredients: 8 non-empty out of 20 slots
         assert len(result["ingredients"]) == 8

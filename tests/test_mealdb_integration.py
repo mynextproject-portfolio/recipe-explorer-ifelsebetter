@@ -42,7 +42,7 @@ async def test_real_mealdb_search():
     assert "title" in recipe
     assert "Arrabiata" in recipe["title"]
     assert recipe["cuisine"] == "Italian"
-    assert recipe["source"] == "mealdb"
+    assert recipe["source"] == "external"
 
     # Verify ingredients were collected from strIngredient1..20
     assert isinstance(recipe["ingredients"], list)

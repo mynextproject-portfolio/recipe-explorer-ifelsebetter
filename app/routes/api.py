@@ -16,7 +16,7 @@ async def search_recipes_unified(q: Optional[str] = None):
     """
     Unified search: combines internal recipes + TheMealDB external results.
 
-    Each recipe includes a 'source' field ('internal' or 'mealdb').
+    Each recipe includes a 'source' field ('internal' or 'external').
     If TheMealDB is unavailable, returns only internal results gracefully.
     """
     # Internal search
@@ -44,7 +44,7 @@ async def search_recipes_unified(q: Optional[str] = None):
             from app.routes.mealdb_routes import get_adapter
             adapter = get_adapter()
             external_results = await adapter.search_by_name(q)
-            # External results already have source="mealdb" from the adapter
+            # External results already have source="external" from the adapter
         except Exception as exc:
             logger.warning("External search failed, returning internal only: %s", exc)
 

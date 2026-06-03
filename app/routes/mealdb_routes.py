@@ -53,7 +53,7 @@ async def search_external(q: Optional[str] = None):
     results = await adapter.search_by_name(q)
 
     return {
-        "source": "themealdb",
+        "source": "external",
         "query": q,
         "count": len(results),
         "recipes": results,
@@ -155,7 +155,7 @@ async def search_all(q: Optional[str] = None):
             "recipes": internal_results,
         },
         "external": {
-            "source": "themealdb",
+            "source": "external",
             "count": len(external_results),
             "recipes": external_results,
             "error": external_error,

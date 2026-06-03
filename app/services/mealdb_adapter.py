@@ -189,7 +189,7 @@ class MealDBAdapter:
             "instructions": instructions,
             "tags": self._parse_tags(raw.get("strTags")),
             "cuisine": raw.get("strArea", "Global"),
-            "source": "mealdb",
+            "source": "external",
             "image_url": raw.get("strMealThumb", ""),
         }
 
