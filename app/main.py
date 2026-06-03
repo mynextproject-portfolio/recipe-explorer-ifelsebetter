@@ -6,6 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.routes import api, pages
+from app.routes import mealdb_routes
+from app.recipe_schema import get_schema
+from app.services.mealdb_adapter import MealDBAdapter
 import os
 from app.services.storage import recipe_storage
 
@@ -31,6 +34,10 @@ async def lifespan(app: FastAPI):
         except Exception as error:
             print(f"Failed to seed sample data: {error}")
 
+    # Initialize TheMealDB adapter
+    from app.routes.mealdb_routes import set_adapter
+    set_adapter(MealDBAdapter())
+
     yield
 
 
@@ -42,6 +49,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Include routers
 app.include_router(api.router)
+app.include_router(mealdb_routes.router)
 app.include_router(pages.router)
 
 
@@ -49,6 +57,12 @@ app.include_router(pages.router)
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/api/schema")
+def recipe_schema():
+    """Return the canonical recipe JSON Schema (the API contract)."""
+    return get_schema()
 
 # @app.get("/status")
 # def status():
