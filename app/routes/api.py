@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Response
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import json
 import logging
+import time
 from app.models import Recipe, RecipeCreate, RecipeUpdate
 from app.services.storage import recipe_storage
 
@@ -12,14 +13,17 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/recipes/search")
-async def search_recipes_unified(q: Optional[str] = None):
+async def search_recipes_unified(response: Response, q: Optional[str] = None):
     """
     Unified search: combines internal recipes + TheMealDB external results.
 
     Each recipe includes a 'source' field ('internal' or 'external').
     If TheMealDB is unavailable, returns only internal results gracefully.
     """
+    t_start = time.perf_counter()
+
     # Internal search
+    t0 = time.perf_counter()
     if q and q.strip():
         internal = recipe_storage.search_recipes(q)
     else:
@@ -36,9 +40,11 @@ async def search_recipes_unified(q: Optional[str] = None):
         if "updated_at" in recipe_dict and recipe_dict["updated_at"]:
             recipe_dict["updated_at"] = recipe_dict["updated_at"].isoformat()
         internal_results.append(recipe_dict)
+    internal_ms = (time.perf_counter() - t0) * 1000.0
 
     # External search (with graceful fallback)
     external_results = []
+    t0 = time.perf_counter()
     if q and q.strip():
         try:
             from app.routes.mealdb_routes import get_adapter
@@ -47,9 +53,21 @@ async def search_recipes_unified(q: Optional[str] = None):
             # External results already have source="external" from the adapter
         except Exception as exc:
             logger.warning("External search failed, returning internal only: %s", exc)
+    external_ms = (time.perf_counter() - t0) * 1000.0
 
     # Combine both result sets — internal first, then external
     all_results = internal_results + external_results
+
+    total_ms = (time.perf_counter() - t_start) * 1000.0
+
+    # Set response headers for performance tracking
+    response.headers["X-Internal-Time-Ms"] = f"{internal_ms:.2f}"
+    response.headers["X-External-Time-Ms"] = f"{external_ms:.2f}"
+    response.headers["Server-Timing"] = (
+        f'internal;dur={internal_ms:.2f};desc="Internal Lookup", '
+        f'external;dur={external_ms:.2f};desc="TheMealDB API", '
+        f'total;dur={total_ms:.2f};desc="Total Request Time"'
+    )
 
     return all_results
 
@@ -67,6 +85,21 @@ def get_recipes(search: Optional[str] = None):
     print(f"Returning {len(recipes)} recipes")
     
     return {"recipes": recipes}
+
+
+@router.get("/recipes/internal/{recipe_id}")
+def get_internal_recipe(recipe_id: str):
+    """Get a specific internal recipe by ID, tagged with source='internal'."""
+    recipe = recipe_storage.get_recipe(recipe_id)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe_dict = recipe.model_dump()
+    recipe_dict["source"] = "internal"
+    if recipe_dict.get("created_at"):
+        recipe_dict["created_at"] = recipe_dict["created_at"].isoformat()
+    if recipe_dict.get("updated_at"):
+        recipe_dict["updated_at"] = recipe_dict["updated_at"].isoformat()
+    return recipe_dict
 
 
 @router.get("/recipes/{recipe_id}")

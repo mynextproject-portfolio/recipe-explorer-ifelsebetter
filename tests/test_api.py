@@ -161,3 +161,63 @@ def test_recipe_pages_load(client, clean_storage, sample_recipe_data):
     assert client.get(f"/recipes/{recipe_id}").status_code == 200
     assert client.get("/recipes/new").status_code == 200
     assert client.get("/import").status_code == 200
+
+
+def test_unified_search_timing_headers(client, clean_storage):
+    """Test that the unified search endpoint returns the timing headers"""
+    response = client.get("/api/recipes/search?q=chicken")
+    assert response.status_code == 200
+    assert "X-Internal-Time-Ms" in response.headers
+    assert "X-External-Time-Ms" in response.headers
+    assert "Server-Timing" in response.headers
+    
+    # Verify they are parseable floats
+    internal_time = float(response.headers["X-Internal-Time-Ms"])
+    external_time = float(response.headers["X-External-Time-Ms"])
+    assert internal_time >= 0.0
+    assert external_time >= 0.0
+
+
+def test_unified_search_source_field(client, clean_storage, sample_recipe_data):
+    """Contract test: Unified search results include source field on internal recipes."""
+    # Create an internal recipe with a searchable title
+    sample_recipe_data["title"] = "Test Chicken Curry"
+    client.post("/api/recipes", json=sample_recipe_data)
+
+    response = client.get("/api/recipes/search?q=Chicken Curry")
+    assert response.status_code == 200
+
+    results = response.json()
+    assert isinstance(results, list)
+
+    # At least one internal result should come back
+    internal_results = [r for r in results if r.get("source") == "internal"]
+    assert len(internal_results) >= 1
+    assert internal_results[0]["title"] == "Test Chicken Curry"
+
+
+def test_get_internal_recipe_success(client, clean_storage, sample_recipe_data):
+    """Contract test: /api/recipes/internal/{id} returns recipe with source='internal'."""
+    create_response = client.post("/api/recipes", json=sample_recipe_data)
+    recipe_id = create_response.json()["id"]
+
+    response = client.get(f"/api/recipes/internal/{recipe_id}")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["id"] == recipe_id
+    assert data["source"] == "internal"
+    assert data["title"] == sample_recipe_data["title"]
+
+
+def test_get_internal_recipe_not_found(client, clean_storage):
+    """Contract test: /api/recipes/internal/{id} returns 404 for non-existent ID."""
+    response = client.get("/api/recipes/internal/non-existent-id")
+    assert response.status_code == 404
+
+
+def test_get_external_recipe_not_found(client, clean_storage):
+    """Contract test: /api/recipes/external/{id} returns 404 for non-existent meal ID."""
+    response = client.get("/api/recipes/external/99999999")
+    assert response.status_code == 404
+
