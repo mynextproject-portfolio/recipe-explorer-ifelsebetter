@@ -8,3 +8,4 @@ httpx2>=2.3.0,<3
 httpx>=0.27.0,<1
 jsonschema>=4.23,<5
 respx>=0.22.0,<1
+redis>=5.0,<6

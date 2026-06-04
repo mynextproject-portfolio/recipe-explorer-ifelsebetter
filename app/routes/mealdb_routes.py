@@ -50,7 +50,7 @@ async def search_external(q: Optional[str] = None):
         )
 
     adapter = get_adapter()
-    results = await adapter.search_by_name(q)
+    results, _cache_hit = await adapter.search_by_name(q)
 
     return {
         "source": "external",
@@ -143,7 +143,7 @@ async def search_all(q: Optional[str] = None):
     if q and q.strip():
         try:
             adapter = get_adapter()
-            external_results = await adapter.search_by_name(q)
+            external_results, _cache_hit = await adapter.search_by_name(q)
         except Exception as exc:
             logger.warning("External search failed, returning internal only: %s", exc)
             external_error = "External API unavailable"

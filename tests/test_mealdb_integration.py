@@ -29,7 +29,7 @@ async def test_real_mealdb_search():
     """
     adapter = MealDBAdapter(timeout=10.0)  # Generous timeout for CI
 
-    results = await adapter.search_by_name("Arrabiata")
+    results, cache_hit = await adapter.search_by_name("Arrabiata")
 
     # TheMealDB should have at least one Arrabiata recipe
     assert len(results) >= 1
@@ -87,5 +87,5 @@ async def test_real_mealdb_search_no_results():
     """
     adapter = MealDBAdapter(timeout=10.0)
 
-    results = await adapter.search_by_name("xyzzy_nonexistent_meal_12345")
+    results, _ = await adapter.search_by_name("xyzzy_nonexistent_meal_12345")
     assert results == []

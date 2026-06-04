@@ -221,3 +221,12 @@ def test_get_external_recipe_not_found(client, clean_storage):
     response = client.get("/api/recipes/external/99999999")
     assert response.status_code == 404
 
+
+def test_unified_search_x_cache_header(client, clean_storage):
+    """Contract test: Unified search includes X-Cache header."""
+    response = client.get("/api/recipes/search?q=chicken")
+    assert response.status_code == 200
+    assert "X-Cache" in response.headers
+    assert response.headers["X-Cache"] in ("HIT", "MISS")
+
+

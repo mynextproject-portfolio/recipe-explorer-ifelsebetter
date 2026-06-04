@@ -44,12 +44,13 @@ async def search_recipes_unified(response: Response, q: Optional[str] = None):
 
     # External search (with graceful fallback)
     external_results = []
+    cache_hit = False
     t0 = time.perf_counter()
     if q and q.strip():
         try:
             from app.routes.mealdb_routes import get_adapter
             adapter = get_adapter()
-            external_results = await adapter.search_by_name(q)
+            external_results, cache_hit = await adapter.search_by_name(q)
             # External results already have source="external" from the adapter
         except Exception as exc:
             logger.warning("External search failed, returning internal only: %s", exc)
@@ -63,6 +64,7 @@ async def search_recipes_unified(response: Response, q: Optional[str] = None):
     # Set response headers for performance tracking
     response.headers["X-Internal-Time-Ms"] = f"{internal_ms:.2f}"
     response.headers["X-External-Time-Ms"] = f"{external_ms:.2f}"
+    response.headers["X-Cache"] = "HIT" if cache_hit else "MISS"
     response.headers["Server-Timing"] = (
         f'internal;dur={internal_ms:.2f};desc="Internal Lookup", '
         f'external;dur={external_ms:.2f};desc="TheMealDB API", '

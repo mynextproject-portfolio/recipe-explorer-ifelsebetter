@@ -165,12 +165,13 @@ class TestSearchByName:
             return_value=httpx.Response(200, json=fixture_data)
         )
 
-        results = await adapter.search_by_name("arrabiata")
+        results, cache_hit = await adapter.search_by_name("arrabiata")
 
         assert len(results) == 1
         assert results[0]["title"] == "Spicy Arrabiata Penne"
         assert results[0]["cuisine"] == "Italian"
         assert len(results[0]["ingredients"]) == 8
+        assert cache_hit is False
 
     @respx.mock
     @pytest.mark.anyio
@@ -180,8 +181,9 @@ class TestSearchByName:
             return_value=httpx.Response(200, json={"meals": None})
         )
 
-        results = await adapter.search_by_name("xyznonexistent")
+        results, cache_hit = await adapter.search_by_name("xyznonexistent")
         assert results == []
+        assert cache_hit is False
 
     @respx.mock
     @pytest.mark.anyio
@@ -191,7 +193,7 @@ class TestSearchByName:
             side_effect=httpx.TimeoutException("Connection timed out")
         )
 
-        results = await adapter.search_by_name("chicken")
+        results, cache_hit = await adapter.search_by_name("chicken")
         assert results == []
 
     @respx.mock
@@ -202,7 +204,7 @@ class TestSearchByName:
             return_value=httpx.Response(429, text="Too Many Requests")
         )
 
-        results = await adapter.search_by_name("chicken")
+        results, cache_hit = await adapter.search_by_name("chicken")
         assert results == []
 
     @respx.mock
@@ -213,7 +215,7 @@ class TestSearchByName:
             return_value=httpx.Response(200, text="<html>Not JSON</html>")
         )
 
-        results = await adapter.search_by_name("chicken")
+        results, cache_hit = await adapter.search_by_name("chicken")
         assert results == []
 
     @respx.mock
@@ -224,7 +226,7 @@ class TestSearchByName:
             return_value=httpx.Response(200, json={"error": "something"})
         )
 
-        results = await adapter.search_by_name("chicken")
+        results, cache_hit = await adapter.search_by_name("chicken")
         assert results == []
 
     @respx.mock
@@ -235,16 +237,16 @@ class TestSearchByName:
             return_value=httpx.Response(500, text="Internal Server Error")
         )
 
-        results = await adapter.search_by_name("chicken")
+        results, cache_hit = await adapter.search_by_name("chicken")
         assert results == []
 
     @pytest.mark.anyio
     async def test_search_empty_query(self, adapter):
         """Empty/whitespace query returns empty list without making API call."""
-        results = await adapter.search_by_name("")
+        results, _ = await adapter.search_by_name("")
         assert results == []
 
-        results = await adapter.search_by_name("   ")
+        results, _ = await adapter.search_by_name("   ")
         assert results == []
 
 
@@ -330,3 +332,135 @@ class TestParseResponse:
         }
         results = adapter._parse_meals_response(data)
         assert results == []  # Both should be skipped
+
+
+# ─── Cache Behavior Tests ────────────────────────────────────────────────────
+
+
+class FakeCache:
+    """In-memory cache mock that mimics RedisCache interface."""
+
+    def __init__(self):
+        self.store = {}
+        self.get_calls = []
+        self.set_calls = []
+
+    def get(self, key):
+        self.get_calls.append(key)
+        return self.store.get(key)
+
+    def set(self, key, value, ttl_seconds=None):
+        self.set_calls.append((key, value, ttl_seconds))
+        self.store[key] = value
+        return True
+
+    @property
+    def is_available(self):
+        return True
+
+
+class BrokenCache:
+    """Simulates a Redis that's down — all operations return None/False."""
+
+    def get(self, key):
+        return None
+
+    def set(self, key, value, ttl_seconds=None):
+        return False
+
+    @property
+    def is_available(self):
+        return False
+
+
+class TestCacheBehavior:
+    """Test caching integration in MealDBAdapter."""
+
+    @respx.mock
+    @pytest.mark.anyio
+    async def test_cache_miss_stores_results(self, fixture_data):
+        """On cache miss, API is called and results are stored in cache."""
+        cache = FakeCache()
+        adapter = MealDBAdapter(cache=cache)
+
+        respx.get("https://www.themealdb.com/api/json/v1/1/search.php").mock(
+            return_value=httpx.Response(200, json=fixture_data)
+        )
+
+        results, cache_hit = await adapter.search_by_name("arrabiata")
+
+        assert cache_hit is False
+        assert len(results) == 1
+        assert results[0]["title"] == "Spicy Arrabiata Penne"
+
+        # Verify cache was checked then populated
+        assert len(cache.get_calls) == 1
+        assert len(cache.set_calls) == 1
+        assert cache.set_calls[0][0] == "mealdb:search:arrabiata"
+
+    @pytest.mark.anyio
+    async def test_cache_hit_skips_api(self, fixture_data):
+        """On cache hit, API is NOT called and cached data is returned."""
+        cache = FakeCache()
+        cached_results = [{"id": "mealdb-52771", "title": "Spicy Arrabiata Penne", "source": "external"}]
+        cache.store["mealdb:search:arrabiata"] = cached_results
+
+        adapter = MealDBAdapter(cache=cache)
+
+        # No respx mock — if it tries to hit the API, it will fail
+        results, cache_hit = await adapter.search_by_name("arrabiata")
+
+        assert cache_hit is True
+        assert results == cached_results
+        assert len(cache.get_calls) == 1
+        assert len(cache.set_calls) == 0  # No new writes
+
+    @respx.mock
+    @pytest.mark.anyio
+    async def test_broken_cache_falls_through_to_api(self, fixture_data):
+        """When Redis is down, adapter falls through to the live API."""
+        cache = BrokenCache()
+        adapter = MealDBAdapter(cache=cache)
+
+        respx.get("https://www.themealdb.com/api/json/v1/1/search.php").mock(
+            return_value=httpx.Response(200, json=fixture_data)
+        )
+
+        results, cache_hit = await adapter.search_by_name("arrabiata")
+
+        assert cache_hit is False
+        assert len(results) == 1
+        assert results[0]["title"] == "Spicy Arrabiata Penne"
+
+    @respx.mock
+    @pytest.mark.anyio
+    async def test_cache_miss_on_lookup_stores_result(self, fixture_data):
+        """get_by_id caches the result on miss."""
+        cache = FakeCache()
+        adapter = MealDBAdapter(cache=cache)
+
+        respx.get("https://www.themealdb.com/api/json/v1/1/lookup.php").mock(
+            return_value=httpx.Response(200, json=fixture_data)
+        )
+
+        result = await adapter.get_by_id("52771")
+
+        assert result is not None
+        assert result["id"] == "mealdb-52771"
+        assert len(cache.set_calls) == 1
+        assert cache.set_calls[0][0] == "mealdb:lookup:52771"
+
+    @pytest.mark.anyio
+    async def test_cache_hit_on_lookup(self, fixture_data):
+        """get_by_id returns cached result on hit."""
+        cache = FakeCache()
+        cached_recipe = {"id": "mealdb-52771", "title": "Spicy Arrabiata Penne"}
+        cache.store["mealdb:lookup:52771"] = cached_recipe
+
+        adapter = MealDBAdapter(cache=cache)
+
+        result = await adapter.get_by_id("52771")
+
+        assert result == cached_recipe
+        assert len(cache.set_calls) == 0
+
