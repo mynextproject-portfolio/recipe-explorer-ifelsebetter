@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Response
 from fastapi.responses import JSONResponse
-from typing import List, Optional
+from typing import Optional
 import json
 import logging
 import time
-from app.models import Recipe, RecipeCreate, RecipeUpdate
+from app.models import RecipeCreate, RecipeUpdate
 from app.services.storage import recipe_storage
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ async def search_recipes_unified(response: Response, q: Optional[str] = None):
     if q and q.strip():
         try:
             from app.routes.mealdb_routes import get_adapter
+
             adapter = get_adapter()
             external_results, cache_hit = await adapter.search_by_name(q)
             # External results already have source="external" from the adapter
@@ -82,10 +83,10 @@ def get_recipes(search: Optional[str] = None):
         recipes = recipe_storage.search_recipes(search)
     else:
         recipes = recipe_storage.get_all_recipes()
-    
+
     # Log for debugging (remove in production)
     print(f"Returning {len(recipes)} recipes")
-    
+
     return {"recipes": recipes}
 
 
@@ -144,27 +145,29 @@ async def import_recipes(file: UploadFile = File(...)):
     try:
         # Read file
         content = await file.read()
-        
+
         # Check file size
         if len(content) > 1000000:  # 1MB limit
             return {"error": "File too large"}
-        
+
         # Parse JSON
         recipes_data = json.loads(content)
-        
+
         # Validate it's a list
         if not isinstance(recipes_data, list):
-            raise HTTPException(status_code=400, detail="JSON must be an array of recipes")
-        
+            raise HTTPException(
+                status_code=400, detail="JSON must be an array of recipes"
+            )
+
         # Log the import (should use proper logging)
         print(f"Importing {len(recipes_data)} recipes from {file.filename}")
-        
+
         # Actually import
         count = recipe_storage.import_recipes(recipes_data)
-        
+
         # Different success response format
         return {"message": f"Successfully imported {count} recipes", "count": count}
-    
+
     except json.JSONDecodeError as e:
         print(f"JSON error: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON format")

@@ -11,7 +11,8 @@ Jamie's minimum requirements:
 
 The full schema extends this with all fields our Recipe model supports.
 """
-from jsonschema import validate, ValidationError as JsonSchemaValidationError
+
+from jsonschema import validate
 
 
 # The canonical JSON Schema for a recipe
@@ -22,59 +23,50 @@ RECIPE_SCHEMA = {
     "type": "object",
     "required": ["title", "instructions", "cuisine"],
     "properties": {
-        "id": {
-            "type": "string",
-            "description": "Unique identifier for the recipe"
-        },
+        "id": {"type": "string", "description": "Unique identifier for the recipe"},
         "title": {
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "description": "Name of the recipe"
+            "description": "Name of the recipe",
         },
         "description": {
             "type": "string",
-            "description": "Brief description of the recipe"
+            "description": "Brief description of the recipe",
         },
         "ingredients": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "List of ingredients with quantities"
+            "description": "List of ingredients with quantities",
         },
         "instructions": {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 1,
-            "description": "Step-by-step cooking instructions"
+            "description": "Step-by-step cooking instructions",
         },
         "tags": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Categorization tags"
+            "description": "Categorization tags",
         },
         "cuisine": {
             "type": "string",
             "minLength": 1,
-            "description": "Cuisine type (e.g., Italian, Chinese, Mexican)"
+            "description": "Cuisine type (e.g., Italian, Chinese, Mexican)",
         },
-        "created_at": {
-            "type": "string",
-            "description": "ISO 8601 creation timestamp"
-        },
+        "created_at": {"type": "string", "description": "ISO 8601 creation timestamp"},
         "updated_at": {
             "type": "string",
-            "description": "ISO 8601 last-update timestamp"
+            "description": "ISO 8601 last-update timestamp",
         },
         "source": {
             "type": "string",
-            "description": "Origin of the recipe (e.g., 'internal', 'mealdb')"
+            "description": "Origin of the recipe (e.g., 'internal', 'mealdb')",
         },
-        "image_url": {
-            "type": "string",
-            "description": "URL to recipe image"
-        }
+        "image_url": {"type": "string", "description": "URL to recipe image"},
     },
-    "additionalProperties": False
+    "additionalProperties": False,
 }
 
 

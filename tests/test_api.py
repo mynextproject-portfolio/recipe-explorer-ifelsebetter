@@ -4,6 +4,7 @@ These tests verify that endpoints exist, return expected status codes (200, 201,
 and return correctly structured data.
 """
 
+
 def test_health_check(client):
     """Smoke test: API is running and responding"""
     response = client.get("/health")
@@ -32,13 +33,13 @@ def test_create_and_get_recipe(client, clean_storage, sample_recipe_data):
     # Create recipe
     create_response = client.post("/api/recipes", json=sample_recipe_data)
     assert create_response.status_code == 201
-    
+
     recipe = create_response.json()
     assert "id" in recipe
     assert "title" in recipe
     assert "created_at" in recipe
     assert recipe["title"] == sample_recipe_data["title"]
-    
+
     # Get recipe
     get_response = client.get(f"/api/recipes/{recipe['id']}")
     assert get_response.status_code == 200
@@ -47,9 +48,7 @@ def test_create_and_get_recipe(client, clean_storage, sample_recipe_data):
 
 def test_create_recipe_invalid_data(client, clean_storage):
     """Contract test: Invalid recipe data returns 422"""
-    invalid_data = {
-        "title": "Missing fields recipe"
-    }
+    invalid_data = {"title": "Missing fields recipe"}
     response = client.post("/api/recipes", json=invalid_data)
     assert response.status_code == 422
 
@@ -111,13 +110,13 @@ def test_import_recipes(client, clean_storage, sample_recipe_data):
     """Contract test: Import valid JSON returns 200"""
     import io
     import json
-    
+
     file_content = json.dumps([sample_recipe_data])
-    file_obj = io.BytesIO(file_content.encode('utf-8'))
-    
+    file_obj = io.BytesIO(file_content.encode("utf-8"))
+
     response = client.post(
         "/api/recipes/import",
-        files={"file": ("recipes.json", file_obj, "application/json")}
+        files={"file": ("recipes.json", file_obj, "application/json")},
     )
     assert response.status_code == 200
     assert response.json()["count"] == 1
@@ -126,13 +125,13 @@ def test_import_recipes(client, clean_storage, sample_recipe_data):
 def test_import_recipes_invalid_format(client, clean_storage):
     """Contract test: Import malformed JSON returns 400"""
     import io
-    
+
     file_content = "{ malformed json"
-    file_obj = io.BytesIO(file_content.encode('utf-8'))
-    
+    file_obj = io.BytesIO(file_content.encode("utf-8"))
+
     response = client.post(
         "/api/recipes/import",
-        files={"file": ("recipes.json", file_obj, "application/json")}
+        files={"file": ("recipes.json", file_obj, "application/json")},
     )
     assert response.status_code == 400
 
@@ -141,14 +140,14 @@ def test_import_recipes_invalid_data(client, clean_storage):
     """Contract test: Import JSON with invalid schema returns 422"""
     import io
     import json
-    
+
     # JSON is valid format, but schema is incorrect (missing required fields)
     file_content = json.dumps([{"title": "Missing required fields"}])
-    file_obj = io.BytesIO(file_content.encode('utf-8'))
-    
+    file_obj = io.BytesIO(file_content.encode("utf-8"))
+
     response = client.post(
         "/api/recipes/import",
-        files={"file": ("recipes.json", file_obj, "application/json")}
+        files={"file": ("recipes.json", file_obj, "application/json")},
     )
     assert response.status_code == 422
 
@@ -157,7 +156,7 @@ def test_recipe_pages_load(client, clean_storage, sample_recipe_data):
     """Smoke test: Recipe HTML pages load without error"""
     create_response = client.post("/api/recipes", json=sample_recipe_data)
     recipe_id = create_response.json()["id"]
-    
+
     assert client.get(f"/recipes/{recipe_id}").status_code == 200
     assert client.get("/recipes/new").status_code == 200
     assert client.get("/import").status_code == 200
@@ -170,7 +169,7 @@ def test_unified_search_timing_headers(client, clean_storage):
     assert "X-Internal-Time-Ms" in response.headers
     assert "X-External-Time-Ms" in response.headers
     assert "Server-Timing" in response.headers
-    
+
     # Verify they are parseable floats
     internal_time = float(response.headers["X-Internal-Time-Ms"])
     external_time = float(response.headers["X-External-Time-Ms"])
@@ -228,5 +227,3 @@ def test_unified_search_x_cache_header(client, clean_storage):
     assert response.status_code == 200
     assert "X-Cache" in response.headers
     assert response.headers["X-Cache"] in ("HIT", "MISS")
-
-

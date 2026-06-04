@@ -6,6 +6,7 @@ Verifies that the schema enforces Jamie's contract:
   - instructions must be an array of strings, not a text block
   - the /api/schema endpoint returns the schema
 """
+
 import pytest
 from jsonschema import ValidationError as JsonSchemaValidationError
 
@@ -47,7 +48,9 @@ class TestRecipeSchemaValidation:
             "instructions": ["Step 1"],
             "cuisine": "Italian",
         }
-        with pytest.raises(JsonSchemaValidationError, match="'title' is a required property"):
+        with pytest.raises(
+            JsonSchemaValidationError, match="'title' is a required property"
+        ):
             validate_recipe(recipe)
 
     def test_missing_instructions_fails(self):
@@ -56,7 +59,9 @@ class TestRecipeSchemaValidation:
             "title": "Pasta Carbonara",
             "cuisine": "Italian",
         }
-        with pytest.raises(JsonSchemaValidationError, match="'instructions' is a required property"):
+        with pytest.raises(
+            JsonSchemaValidationError, match="'instructions' is a required property"
+        ):
             validate_recipe(recipe)
 
     def test_missing_cuisine_fails(self):
@@ -65,7 +70,9 @@ class TestRecipeSchemaValidation:
             "title": "Pasta Carbonara",
             "instructions": ["Step 1"],
         }
-        with pytest.raises(JsonSchemaValidationError, match="'cuisine' is a required property"):
+        with pytest.raises(
+            JsonSchemaValidationError, match="'cuisine' is a required property"
+        ):
             validate_recipe(recipe)
 
     def test_instructions_must_be_array(self):
