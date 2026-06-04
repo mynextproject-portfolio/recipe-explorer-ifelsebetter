@@ -34,10 +34,10 @@ async def lifespan(app: FastAPI):
 
     # Initialize Redis cache and TheMealDB adapter
     from app.services.cache import RedisCache
-    from app.routes.mealdb_routes import set_adapter
+    from app.dependencies import set_dependencies
 
     cache = RedisCache()
-    set_adapter(MealDBAdapter(cache=cache))
+    set_dependencies(cache=cache, mealdb_adapter=MealDBAdapter(cache=cache))
 
     yield
 

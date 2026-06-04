@@ -28,7 +28,10 @@ DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_TTL = 86400  # 24 hours
 
 
-class RedisCache:
+from app.services.interfaces import CacheInterface
+
+
+class RedisCache(CacheInterface):
     """Resilient Redis cache with JSON serialization."""
 
     def __init__(self, redis_url: Optional[str] = None, default_ttl: int = DEFAULT_TTL):

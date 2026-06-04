@@ -8,36 +8,22 @@ for fetching recipes from TheMealDB external API.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.models import RecipeCreate
-from app.services.mealdb_adapter import MealDBAdapter
-from app.services.storage import recipe_storage
+from app.services.interfaces import RecipeStorageInterface, MealDBAdapterInterface
+from app.dependencies import get_storage, get_mealdb_adapter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/recipes")
 
-# Module-level adapter instance, initialized during app lifespan
-_adapter: Optional[MealDBAdapter] = None
-
-
-def get_adapter() -> MealDBAdapter:
-    """Get the MealDB adapter, creating a default one if not initialized."""
-    global _adapter
-    if _adapter is None:
-        _adapter = MealDBAdapter()
-    return _adapter
-
-
-def set_adapter(adapter: MealDBAdapter) -> None:
-    """Set the MealDB adapter (used during app startup and testing)."""
-    global _adapter
-    _adapter = adapter
-
 
 @router.get("/external/search")
-async def search_external(q: Optional[str] = None):
+async def search_external(
+    q: Optional[str] = None,
+    adapter: MealDBAdapterInterface = Depends(get_mealdb_adapter),
+):
     """
     Search TheMealDB for recipes matching a query.
 
@@ -47,7 +33,6 @@ async def search_external(q: Optional[str] = None):
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required.")
 
-    adapter = get_adapter()
     results, _cache_hit = await adapter.search_by_name(q)
 
     return {
@@ -59,11 +44,13 @@ async def search_external(q: Optional[str] = None):
 
 
 @router.get("/external/{meal_id}")
-async def get_external_recipe(meal_id: str):
+async def get_external_recipe(
+    meal_id: str,
+    adapter: MealDBAdapterInterface = Depends(get_mealdb_adapter),
+):
     """
     Look up a specific recipe from TheMealDB by meal ID.
     """
-    adapter = get_adapter()
     recipe = await adapter.get_by_id(meal_id)
 
     if not recipe:
@@ -75,14 +62,17 @@ async def get_external_recipe(meal_id: str):
 
 
 @router.post("/external/{meal_id}/save", status_code=201)
-async def save_external_recipe(meal_id: str):
+async def save_external_recipe(
+    meal_id: str,
+    adapter: MealDBAdapterInterface = Depends(get_mealdb_adapter),
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """
     Fetch a recipe from TheMealDB and save it to internal storage.
 
     This allows users to "save to collection" — an explicit action
     rather than auto-saving all external results.
     """
-    adapter = get_adapter()
     external_recipe = await adapter.get_by_id(meal_id)
 
     if not external_recipe:
@@ -91,7 +81,7 @@ async def save_external_recipe(meal_id: str):
         )
 
     # Check if already saved (by the mealdb-prefixed id)
-    existing = recipe_storage.get_recipe(external_recipe["id"])
+    existing = storage.get_recipe(external_recipe["id"])
     if existing:
         return {
             "message": "Recipe already saved",
@@ -108,7 +98,7 @@ async def save_external_recipe(meal_id: str):
         cuisine=external_recipe["cuisine"],
     )
 
-    saved = recipe_storage.create_recipe(recipe_data)
+    saved = storage.create_recipe(recipe_data)
     logger.info(
         "Saved TheMealDB recipe '%s' as internal recipe '%s'", meal_id, saved.id
     )
@@ -120,7 +110,11 @@ async def save_external_recipe(meal_id: str):
 
 
 @router.get("/search-all")
-async def search_all(q: Optional[str] = None):
+async def search_all(
+    q: Optional[str] = None,
+    adapter: MealDBAdapterInterface = Depends(get_mealdb_adapter),
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """
     Combined search: internal recipes + TheMealDB.
 
@@ -129,9 +123,9 @@ async def search_all(q: Optional[str] = None):
     """
     # Internal search
     if q and q.strip():
-        internal = recipe_storage.search_recipes(q)
+        internal = storage.search_recipes(q)
     else:
-        internal = recipe_storage.get_all_recipes()
+        internal = storage.get_all_recipes()
 
     internal_results = [r.model_dump() for r in internal]
 
@@ -140,7 +134,6 @@ async def search_all(q: Optional[str] = None):
     external_error = None
     if q and q.strip():
         try:
-            adapter = get_adapter()
             external_results, _cache_hit = await adapter.search_by_name(q)
         except Exception as exc:
             logger.warning("External search failed, returning internal only: %s", exc)
