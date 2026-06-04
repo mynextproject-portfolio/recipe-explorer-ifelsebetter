@@ -15,15 +15,13 @@ Error Handling Strategy:
 
 import logging
 import re
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 import httpx
 
 from app.recipe_schema import validate_recipe
 from jsonschema import ValidationError as JsonSchemaValidationError
-
-if TYPE_CHECKING:
-    from app.services.cache import RedisCache
+from app.services.interfaces import CacheInterface, MealDBAdapterInterface
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +31,14 @@ DEFAULT_TIMEOUT = 5.0  # seconds
 CACHE_TTL = 86400  # 24 hours
 
 
-class MealDBAdapter:
+class MealDBAdapter(MealDBAdapterInterface):
     """Adapter for TheMealDB external API."""
 
     def __init__(
         self,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
-        cache: Optional["RedisCache"] = None,
+        cache: Optional[CacheInterface] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout

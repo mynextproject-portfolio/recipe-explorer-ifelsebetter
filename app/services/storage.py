@@ -6,7 +6,10 @@ from app.models import Recipe, RecipeCreate, RecipeUpdate
 recipe_view_count = {}
 
 
-class RecipeStorage:
+from app.services.interfaces import RecipeStorageInterface
+
+
+class RecipeStorage(RecipeStorageInterface):
     def __init__(self):
         self.recipes: Dict[str, Recipe] = {}
 

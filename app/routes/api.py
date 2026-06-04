@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Response
+from fastapi import APIRouter, HTTPException, UploadFile, File, Response, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
 import json
 import logging
 import time
 from app.models import RecipeCreate, RecipeUpdate
-from app.services.storage import recipe_storage
+from app.services.interfaces import RecipeStorageInterface, MealDBAdapterInterface
+from app.dependencies import get_storage, get_mealdb_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,12 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/recipes/search")
-async def search_recipes_unified(response: Response, q: Optional[str] = None):
+async def search_recipes_unified(
+    response: Response,
+    q: Optional[str] = None,
+    storage: RecipeStorageInterface = Depends(get_storage),
+    adapter: MealDBAdapterInterface = Depends(get_mealdb_adapter),
+):
     """
     Unified search: combines internal recipes + TheMealDB external results.
 
@@ -25,9 +31,9 @@ async def search_recipes_unified(response: Response, q: Optional[str] = None):
     # Internal search
     t0 = time.perf_counter()
     if q and q.strip():
-        internal = recipe_storage.search_recipes(q)
+        internal = storage.search_recipes(q)
     else:
-        internal = recipe_storage.get_all_recipes()
+        internal = storage.get_all_recipes()
 
     # Add source field to internal recipes
     internal_results = []
@@ -48,9 +54,6 @@ async def search_recipes_unified(response: Response, q: Optional[str] = None):
     t0 = time.perf_counter()
     if q and q.strip():
         try:
-            from app.routes.mealdb_routes import get_adapter
-
-            adapter = get_adapter()
             external_results, cache_hit = await adapter.search_by_name(q)
             # External results already have source="external" from the adapter
         except Exception as exc:
@@ -76,13 +79,16 @@ async def search_recipes_unified(response: Response, q: Optional[str] = None):
 
 
 @router.get("/recipes")
-def get_recipes(search: Optional[str] = None):
+def get_recipes(
+    search: Optional[str] = None,
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Get all recipes or search by title"""
     # TODO: Add pagination when we have more than 100 recipes
     if search:
-        recipes = recipe_storage.search_recipes(search)
+        recipes = storage.search_recipes(search)
     else:
-        recipes = recipe_storage.get_all_recipes()
+        recipes = storage.get_all_recipes()
 
     # Log for debugging (remove in production)
     print(f"Returning {len(recipes)} recipes")
@@ -91,9 +97,12 @@ def get_recipes(search: Optional[str] = None):
 
 
 @router.get("/recipes/internal/{recipe_id}")
-def get_internal_recipe(recipe_id: str):
+def get_internal_recipe(
+    recipe_id: str,
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Get a specific internal recipe by ID, tagged with source='internal'."""
-    recipe = recipe_storage.get_recipe(recipe_id)
+    recipe = storage.get_recipe(recipe_id)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     recipe_dict = recipe.model_dump()
@@ -106,41 +115,57 @@ def get_internal_recipe(recipe_id: str):
 
 
 @router.get("/recipes/{recipe_id}")
-def get_recipe(recipe_id: str):
+def get_recipe(
+    recipe_id: str,
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Get a specific recipe by ID"""
-    recipe = recipe_storage.get_recipe(recipe_id)
+    recipe = storage.get_recipe(recipe_id)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return recipe
 
 
 @router.post("/recipes", status_code=201)
-def create_recipe(recipe: RecipeCreate):
+def create_recipe(
+    recipe: RecipeCreate,
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Create a new recipe"""
-    new_recipe = recipe_storage.create_recipe(recipe)
+    new_recipe = storage.create_recipe(recipe)
     return new_recipe
 
 
 @router.put("/recipes/{recipe_id}")
-def update_recipe(recipe_id: str, recipe: RecipeUpdate):
+def update_recipe(
+    recipe_id: str,
+    recipe: RecipeUpdate,
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Update an existing recipe"""
-    updated_recipe = recipe_storage.update_recipe(recipe_id, recipe)
+    updated_recipe = storage.update_recipe(recipe_id, recipe)
     if not updated_recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return updated_recipe
 
 
 @router.delete("/recipes/{recipe_id}")
-def delete_recipe(recipe_id: str):
+def delete_recipe(
+    recipe_id: str,
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Delete a recipe"""
-    success = recipe_storage.delete_recipe(recipe_id)
+    success = storage.delete_recipe(recipe_id)
     if not success:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return {"message": "Recipe deleted successfully", "status": "success"}
 
 
 @router.post("/recipes/import")
-async def import_recipes(file: UploadFile = File(...)):
+async def import_recipes(
+    file: UploadFile = File(...),
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Import recipes from JSON file - this method does too much"""
     try:
         # Read file
@@ -148,7 +173,7 @@ async def import_recipes(file: UploadFile = File(...)):
 
         # Check file size
         if len(content) > 1000000:  # 1MB limit
-            return {"error": "File too large"}
+          return {"error": "File too large"}
 
         # Parse JSON
         recipes_data = json.loads(content)
@@ -163,7 +188,7 @@ async def import_recipes(file: UploadFile = File(...)):
         print(f"Importing {len(recipes_data)} recipes from {file.filename}")
 
         # Actually import
-        count = recipe_storage.import_recipes(recipes_data)
+        count = storage.import_recipes(recipes_data)
 
         # Different success response format
         return {"message": f"Successfully imported {count} recipes", "count": count}
@@ -179,9 +204,11 @@ async def import_recipes(file: UploadFile = File(...)):
 
 
 @router.get("/recipes/export")
-def export_recipes():
+def export_recipes(
+    storage: RecipeStorageInterface = Depends(get_storage),
+):
     """Export all recipes as JSON"""
-    recipes = recipe_storage.get_all_recipes()
+    recipes = storage.get_all_recipes()
     # Convert to dict for JSON serialization
     recipes_dict = [recipe.dict() for recipe in recipes]
     return JSONResponse(content=recipes_dict)
