@@ -4,12 +4,13 @@ External recipe routes — TheMealDB integration endpoints.
 Provides search, lookup, save, and combined search endpoints
 for fetching recipes from TheMealDB external API.
 """
+
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import Recipe, RecipeCreate
+from app.models import RecipeCreate
 from app.services.mealdb_adapter import MealDBAdapter
 from app.services.storage import recipe_storage
 
@@ -44,10 +45,7 @@ async def search_external(q: Optional[str] = None):
     If TheMealDB is unreachable, returns an empty list with a warning.
     """
     if not q or not q.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Query parameter 'q' is required."
-        )
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required.")
 
     adapter = get_adapter()
     results, _cache_hit = await adapter.search_by_name(q)
@@ -70,8 +68,7 @@ async def get_external_recipe(meal_id: str):
 
     if not recipe:
         raise HTTPException(
-            status_code=404,
-            detail=f"Meal '{meal_id}' not found on TheMealDB."
+            status_code=404, detail=f"Meal '{meal_id}' not found on TheMealDB."
         )
 
     return recipe
@@ -90,8 +87,7 @@ async def save_external_recipe(meal_id: str):
 
     if not external_recipe:
         raise HTTPException(
-            status_code=404,
-            detail=f"Meal '{meal_id}' not found on TheMealDB."
+            status_code=404, detail=f"Meal '{meal_id}' not found on TheMealDB."
         )
 
     # Check if already saved (by the mealdb-prefixed id)
@@ -113,7 +109,9 @@ async def save_external_recipe(meal_id: str):
     )
 
     saved = recipe_storage.create_recipe(recipe_data)
-    logger.info("Saved TheMealDB recipe '%s' as internal recipe '%s'", meal_id, saved.id)
+    logger.info(
+        "Saved TheMealDB recipe '%s' as internal recipe '%s'", meal_id, saved.id
+    )
 
     return {
         "message": "Recipe saved to collection",

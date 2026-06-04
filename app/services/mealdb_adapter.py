@@ -12,6 +12,7 @@ Error Handling Strategy:
 - Unexpected format: return empty results + log warning
 - Individual meal transform failure: skip that meal, continue with others
 """
+
 import logging
 import re
 from typing import Optional, TYPE_CHECKING
@@ -183,10 +184,12 @@ class MealDBAdapter:
                 if transformed:
                     results.append(transformed)
             except Exception as exc:
-                meal_name = raw_meal.get("strMeal", "Unknown") if isinstance(raw_meal, dict) else "Unknown"
-                logger.warning(
-                    "Failed to transform meal '%s': %s", meal_name, exc
+                meal_name = (
+                    raw_meal.get("strMeal", "Unknown")
+                    if isinstance(raw_meal, dict)
+                    else "Unknown"
                 )
+                logger.warning("Failed to transform meal '%s': %s", meal_name, exc)
                 continue
 
         return results
@@ -215,7 +218,9 @@ class MealDBAdapter:
 
         if not instructions:
             # If we can't parse any instructions, the recipe isn't useful
-            logger.debug("Skipping meal with no parseable instructions: %s", raw.get("strMeal"))
+            logger.debug(
+                "Skipping meal with no parseable instructions: %s", raw.get("strMeal")
+            )
             return None
 
         # --- Build transformed recipe ---
@@ -275,7 +280,9 @@ class MealDBAdapter:
         text = raw_instructions.strip()
 
         # Try splitting on numbered step patterns first: "1.", "1)", "Step 1:", etc.
-        numbered_pattern = re.compile(r"(?:^|\n)\s*(?:step\s*)?\d+[.):\s]+", re.IGNORECASE)
+        numbered_pattern = re.compile(
+            r"(?:^|\n)\s*(?:step\s*)?\d+[.):\s]+", re.IGNORECASE
+        )
         if numbered_pattern.search(text):
             # Split on the number patterns
             parts = numbered_pattern.split(text)

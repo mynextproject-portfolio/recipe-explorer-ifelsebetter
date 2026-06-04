@@ -7,6 +7,7 @@ httpx requests and response fixtures for deterministic tests.
 
 See test_mealdb_integration.py for the one test that hits the real API.
 """
+
 import json
 from pathlib import Path
 
@@ -402,7 +403,13 @@ class TestCacheBehavior:
     async def test_cache_hit_skips_api(self, fixture_data):
         """On cache hit, API is NOT called and cached data is returned."""
         cache = FakeCache()
-        cached_results = [{"id": "mealdb-52771", "title": "Spicy Arrabiata Penne", "source": "external"}]
+        cached_results = [
+            {
+                "id": "mealdb-52771",
+                "title": "Spicy Arrabiata Penne",
+                "source": "external",
+            }
+        ]
         cache.store["mealdb:search:arrabiata"] = cached_results
 
         adapter = MealDBAdapter(cache=cache)
@@ -463,4 +470,3 @@ class TestCacheBehavior:
 
         assert result == cached_recipe
         assert len(cache.set_calls) == 0
-

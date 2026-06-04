@@ -2,14 +2,12 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from app.routes import api, pages
 from app.routes import mealdb_routes
 from app.recipe_schema import get_schema
 from app.services.mealdb_adapter import MealDBAdapter
-import os
 from app.services.storage import recipe_storage
 
 # App configuration
@@ -37,6 +35,7 @@ async def lifespan(app: FastAPI):
     # Initialize Redis cache and TheMealDB adapter
     from app.services.cache import RedisCache
     from app.routes.mealdb_routes import set_adapter
+
     cache = RedisCache()
     set_adapter(MealDBAdapter(cache=cache))
 
@@ -65,6 +64,7 @@ def health_check():
 def recipe_schema():
     """Return the canonical recipe JSON Schema (the API contract)."""
     return get_schema()
+
 
 # @app.get("/status")
 # def status():

@@ -14,6 +14,7 @@ Usage:
         data = fetch_from_api()
         cache.set("mealdb:search:chicken", data, ttl_seconds=86400)
 """
+
 import json
 import logging
 import os

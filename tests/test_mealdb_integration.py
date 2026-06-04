@@ -10,6 +10,7 @@ and only run explicitly:
 Keep at least one integration test to verify the real API adapter works,
 but use mocking (test_mealdb_adapter.py) for everything else.
 """
+
 import pytest
 
 from app.services.mealdb_adapter import MealDBAdapter
