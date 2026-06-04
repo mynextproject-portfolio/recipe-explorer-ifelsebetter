@@ -14,18 +14,22 @@ Error Handling Strategy:
 """
 import logging
 import re
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import httpx
 
 from app.recipe_schema import validate_recipe
 from jsonschema import ValidationError as JsonSchemaValidationError
 
+if TYPE_CHECKING:
+    from app.services.cache import RedisCache
+
 logger = logging.getLogger(__name__)
 
 # TheMealDB free tier base URL (no API key needed)
 DEFAULT_BASE_URL = "https://www.themealdb.com/api/json/v1/1"
 DEFAULT_TIMEOUT = 5.0  # seconds
+CACHE_TTL = 86400  # 24 hours
 
 
 class MealDBAdapter:
@@ -35,19 +39,31 @@ class MealDBAdapter:
         self,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
+        cache: Optional["RedisCache"] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._cache = cache
 
-    async def search_by_name(self, name: str) -> list[dict]:
+    async def search_by_name(self, name: str) -> tuple[list[dict], bool]:
         """
         Search TheMealDB for meals matching a name.
 
-        Returns a list of transformed recipe dicts, or an empty list
-        if the API is unreachable or returns no results.
+        Returns a tuple of (results, cache_hit):
+        - results: list of transformed recipe dicts (empty on error/no results)
+        - cache_hit: True if results came from cache
         """
         if not name or not name.strip():
-            return []
+            return [], False
+
+        cache_key = f"mealdb:search:{name.strip().lower()}"
+
+        # Check cache first
+        if self._cache is not None:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Cache HIT for search '%s'", name)
+                return cached, True
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -58,25 +74,32 @@ class MealDBAdapter:
 
             if response.status_code == 429:
                 logger.warning("TheMealDB rate limited (429). Returning empty results.")
-                return []
+                return [], False
 
             response.raise_for_status()
             data = response.json()
 
         except httpx.TimeoutException:
             logger.warning("TheMealDB request timed out after %ss.", self.timeout)
-            return []
+            return [], False
         except httpx.HTTPStatusError as exc:
             logger.warning("TheMealDB HTTP error %s: %s", exc.response.status_code, exc)
-            return []
+            return [], False
         except httpx.RequestError as exc:
             logger.warning("TheMealDB network error: %s", exc)
-            return []
+            return [], False
         except ValueError:
             logger.error("TheMealDB returned invalid JSON.")
-            return []
+            return [], False
 
-        return self._parse_meals_response(data)
+        results = self._parse_meals_response(data)
+
+        # Store in cache on successful fetch
+        if results and self._cache is not None:
+            self._cache.set(cache_key, results, CACHE_TTL)
+            logger.debug("Cached %d results for search '%s'", len(results), name)
+
+        return results, False
 
     async def get_by_id(self, meal_id: str) -> Optional[dict]:
         """
@@ -86,6 +109,15 @@ class MealDBAdapter:
         """
         if not meal_id or not meal_id.strip():
             return None
+
+        cache_key = f"mealdb:lookup:{meal_id.strip()}"
+
+        # Check cache first
+        if self._cache is not None:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Cache HIT for lookup '%s'", meal_id)
+                return cached
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -115,7 +147,14 @@ class MealDBAdapter:
             return None
 
         meals = self._parse_meals_response(data)
-        return meals[0] if meals else None
+        result = meals[0] if meals else None
+
+        # Store in cache on successful fetch
+        if result is not None and self._cache is not None:
+            self._cache.set(cache_key, result, CACHE_TTL)
+            logger.debug("Cached lookup result for '%s'", meal_id)
+
+        return result
 
     def _parse_meals_response(self, data: dict) -> list[dict]:
         """
