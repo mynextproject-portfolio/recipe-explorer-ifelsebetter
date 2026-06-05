@@ -54,3 +54,13 @@ recipe_search_terms_total = Counter(
     "Search term frequency counter",
     ["term"],
 )
+
+# ---------------------------------------------------------------------------
+# Authentication metrics
+# ---------------------------------------------------------------------------
+auth_operations_total = Counter(
+    "auth_operations_total",
+    "Total authentication operations by type and outcome",
+    ["action", "status"],  # action: register | login | logout | refresh, status: success | failure
+)
+
