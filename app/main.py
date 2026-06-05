@@ -50,15 +50,15 @@ app = FastAPI(title=APP_NAME, version=VERSION, lifespan=lifespan)
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Mount React frontend static assets if they exist
+react_dist = Path("frontend/dist")
+if react_dist.exists():
+    app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
+
 # Include routers
 app.include_router(api.router)
 app.include_router(mealdb_routes.router)
 app.include_router(pages.router)
-
-# Prometheus auto-instrumentation: registers middleware for HTTP request
-# duration / count / in-progress metrics and exposes GET /metrics.
-# TODO(security): In production, restrict /metrics to internal network only.
-Instrumentator().instrument(app).expose(app)
 
 
 # Basic health check
@@ -71,6 +71,24 @@ def health_check():
 def recipe_schema():
     """Return the canonical recipe JSON Schema (the API contract)."""
     return get_schema()
+
+
+# Prometheus auto-instrumentation: registers middleware for HTTP request
+# duration / count / in-progress metrics and exposes GET /metrics.
+# TODO(security): In production, restrict /metrics to internal network only.
+Instrumentator().instrument(app).expose(app)
+
+
+# Serve root static assets from frontend/dist (e.g., vite.svg, favicon.ico)
+@app.get("/{file_name}")
+def serve_root_file(file_name: str):
+    file_path = Path("frontend/dist") / file_name
+    if file_path.exists() and file_path.is_file():
+        from fastapi.responses import FileResponse
+        return FileResponse(file_path)
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="Not found")
+
 
 
 # @app.get("/status")
