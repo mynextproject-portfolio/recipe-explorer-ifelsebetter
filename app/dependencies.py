@@ -102,3 +102,21 @@ async def verify_csrf_token(request: Request) -> None:
         if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
             raise HTTPException(status_code=403, detail="CSRF token mismatch or missing")
 
+
+def get_api_version(request: Request) -> str:
+    """
+    Deduce the requested API version (v1 or v2) from either the URL path or the Accept header.
+    """
+    path = request.url.path
+    if path.startswith("/api/v2"):
+        return "v2"
+    elif path.startswith("/api/v1"):
+        return "v1"
+
+    accept = request.headers.get("accept", "")
+    if "application/vnd.recipe.v2+json" in accept:
+        return "v2"
+
+    return "v1"
+
+

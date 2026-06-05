@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Tuple
 from app.models import (
     Recipe, RecipeCreate, RecipeUpdate,
-    User, UserCreate, Collection, CollectionCreate
+    User, UserCreate, Collection, CollectionCreate,
+    RecipeV2, RecipeV2Create, RecipeV2Update
 )
 
 class RecipeStorageInterface(ABC):
@@ -41,6 +42,65 @@ class RecipeStorageInterface(ABC):
     @abstractmethod
     def import_recipes(self, recipes_data: List[dict]) -> int:
         """Import recipes from raw JSON data, replacing the current set."""
+        pass
+
+    # --- V2 API Methods ---
+    @abstractmethod
+    def get_all_recipes_v2(
+        self, 
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc"
+    ) -> List[RecipeV2]:
+        """Retrieve all v2 recipes with optional filters and sorting."""
+        pass
+
+    @abstractmethod
+    def get_recipe_v2(self, recipe_id: str) -> Optional[RecipeV2]:
+        """Retrieve a specific v2 recipe by its ID."""
+        pass
+
+    @abstractmethod
+    def search_recipes_v2(
+        self, 
+        query: str, 
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc"
+    ) -> List[RecipeV2]:
+        """Search v2 recipes with query, optional filters, and sorting."""
+        pass
+
+    @abstractmethod
+    def create_recipe_v2(self, recipe_data: RecipeV2Create, owner_id: Optional[str] = None) -> RecipeV2:
+        """Create a new v2 recipe."""
+        pass
+
+    @abstractmethod
+    def update_recipe_v2(self, recipe_id: str, recipe_data: RecipeV2Update) -> Optional[RecipeV2]:
+        """Update an existing v2 recipe."""
+        pass
+
+    # --- Bulk Operations ---
+    @abstractmethod
+    def create_recipes_bulk(self, recipes_data: List[RecipeV2Create], owner_id: Optional[str] = None) -> List[RecipeV2]:
+        """Bulk create multiple v2 recipes."""
+        pass
+
+    @abstractmethod
+    def update_recipes_bulk(self, updates: List[Tuple[str, RecipeV2Update]]) -> List[RecipeV2]:
+        """Bulk update multiple v2 recipes."""
+        pass
+
+    @abstractmethod
+    def delete_recipes_bulk(self, recipe_ids: List[str]) -> int:
+        """Bulk delete multiple recipes by ID. Returns count of deleted recipes."""
         pass
 
     # --- User Management ---
