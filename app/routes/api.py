@@ -1,12 +1,15 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Response, Depends
 from fastapi.responses import JSONResponse
-from typing import Optional
+from typing import Optional, List
 import json
 import logging
 import time
-from app.models import RecipeCreate, RecipeUpdate
+from app.models import RecipeCreate, RecipeUpdate, User
 from app.services.interfaces import RecipeStorageInterface, MealDBAdapterInterface
-from app.dependencies import get_storage, get_mealdb_adapter
+from app.dependencies import (
+    get_storage, get_mealdb_adapter,
+    get_current_user, get_optional_current_user, verify_csrf_token
+)
 from app.services.metrics import recipe_search_total, recipe_search_terms_total
 
 logger = logging.getLogger(__name__)
@@ -18,6 +21,7 @@ router = APIRouter(prefix="/api")
 async def search_recipes_unified(
     response: Response,
     q: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
     adapter: MealDBAdapterInterface = Depends(get_mealdb_adapter),
 ):
@@ -29,14 +33,17 @@ async def search_recipes_unified(
     """
     t_start = time.perf_counter()
 
+    # Get user ID if logged in
+    user_id = current_user.id if current_user else None
+
     # Internal search
     t0 = time.perf_counter()
     if q and q.strip():
-        internal = storage.search_recipes(q)
+        internal = storage.search_recipes(q, user_id=user_id)
     else:
-        internal = storage.get_all_recipes()
+        internal = storage.get_all_recipes(user_id=user_id)
 
-    # Add source field to internal recipes
+    # Add source and user-specific details (is_favorite, ratings)
     internal_results = []
     for recipe in internal:
         recipe_dict = recipe.model_dump()
@@ -46,6 +53,19 @@ async def search_recipes_unified(
             recipe_dict["created_at"] = recipe_dict["created_at"].isoformat()
         if "updated_at" in recipe_dict and recipe_dict["updated_at"]:
             recipe_dict["updated_at"] = recipe_dict["updated_at"].isoformat()
+        
+        # Inject favorites and ratings data
+        if user_id:
+            recipe_dict["is_favorite"] = storage.is_favorite(user_id, recipe.id)
+            recipe_dict["user_rating"] = storage.get_user_rating(user_id, recipe.id)
+        else:
+            recipe_dict["is_favorite"] = False
+            recipe_dict["user_rating"] = None
+            
+        stats = storage.get_recipe_rating_stats(recipe.id)
+        recipe_dict["average_rating"] = stats["average"]
+        recipe_dict["rating_count"] = stats["count"]
+        
         internal_results.append(recipe_dict)
     internal_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -56,7 +76,19 @@ async def search_recipes_unified(
     if q and q.strip():
         try:
             external_results, cache_hit = await adapter.search_by_name(q)
-            # External results already have source="external" from the adapter
+            # Add dynamic flags to external results
+            for r in external_results:
+                rid = r.get("id")
+                if user_id and rid:
+                    r["is_favorite"] = storage.is_favorite(user_id, rid)
+                    r["user_rating"] = storage.get_user_rating(user_id, rid)
+                else:
+                    r["is_favorite"] = False
+                    r["user_rating"] = None
+                
+                stats = storage.get_recipe_rating_stats(rid) if rid else {"average": 0, "count": 0}
+                r["average_rating"] = stats["average"]
+                r["rating_count"] = stats["count"]
         except Exception as exc:
             logger.warning("External search failed, returning internal only: %s", exc)
     external_ms = (time.perf_counter() - t0) * 1000.0
@@ -89,14 +121,15 @@ async def search_recipes_unified(
 @router.get("/recipes")
 def get_recipes(
     search: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
     """Get all recipes or search by title"""
-    # TODO: Add pagination when we have more than 100 recipes
+    user_id = current_user.id if current_user else None
     if search:
-        recipes = storage.search_recipes(search)
+        recipes = storage.search_recipes(search, user_id=user_id)
     else:
-        recipes = storage.get_all_recipes()
+        recipes = storage.get_all_recipes(user_id=user_id)
 
     # Log for debugging (remove in production)
     print(f"Returning {len(recipes)} recipes")
@@ -107,18 +140,35 @@ def get_recipes(
 @router.get("/recipes/internal/{recipe_id}")
 def get_internal_recipe(
     recipe_id: str,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
     """Get a specific internal recipe by ID, tagged with source='internal'."""
     recipe = storage.get_recipe(recipe_id)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
+        
+    user_id = current_user.id if current_user else None
+    
     recipe_dict = recipe.model_dump()
     recipe_dict["source"] = "internal"
     if recipe_dict.get("created_at"):
         recipe_dict["created_at"] = recipe_dict["created_at"].isoformat()
     if recipe_dict.get("updated_at"):
         recipe_dict["updated_at"] = recipe_dict["updated_at"].isoformat()
+        
+    # Inject user details
+    if user_id:
+        recipe_dict["is_favorite"] = storage.is_favorite(user_id, recipe_id)
+        recipe_dict["user_rating"] = storage.get_user_rating(user_id, recipe_id)
+    else:
+        recipe_dict["is_favorite"] = False
+        recipe_dict["user_rating"] = None
+        
+    stats = storage.get_recipe_rating_stats(recipe_id)
+    recipe_dict["average_rating"] = stats["average"]
+    recipe_dict["rating_count"] = stats["count"]
+    
     return recipe_dict
 
 
@@ -134,47 +184,67 @@ def get_recipe(
     return recipe
 
 
-@router.post("/recipes", status_code=201)
+@router.post("/recipes", status_code=201, dependencies=[Depends(verify_csrf_token)])
 def create_recipe(
     recipe: RecipeCreate,
+    current_user: User = Depends(get_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
     """Create a new recipe"""
-    new_recipe = storage.create_recipe(recipe)
+    new_recipe = storage.create_recipe(recipe, owner_id=current_user.id)
     return new_recipe
 
 
-@router.put("/recipes/{recipe_id}")
+@router.put("/recipes/{recipe_id}", dependencies=[Depends(verify_csrf_token)])
 def update_recipe(
     recipe_id: str,
     recipe: RecipeUpdate,
+    current_user: User = Depends(get_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
     """Update an existing recipe"""
+    existing = storage.get_recipe(recipe_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    # Enforce ownership check
+    if existing.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this recipe")
+
     updated_recipe = storage.update_recipe(recipe_id, recipe)
     if not updated_recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return updated_recipe
 
 
-@router.delete("/recipes/{recipe_id}")
+@router.delete("/recipes/{recipe_id}", dependencies=[Depends(verify_csrf_token)])
 def delete_recipe(
     recipe_id: str,
+    current_user: User = Depends(get_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
     """Delete a recipe"""
+    existing = storage.get_recipe(recipe_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    # Enforce ownership check
+    if existing.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this recipe")
+
     success = storage.delete_recipe(recipe_id)
     if not success:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return {"message": "Recipe deleted successfully", "status": "success"}
 
 
-@router.post("/recipes/import")
+@router.post("/recipes/import", dependencies=[Depends(verify_csrf_token)])
 async def import_recipes(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
-    """Import recipes from JSON file - this method does too much"""
+    """Import recipes from JSON file"""
     try:
         # Read file
         content = await file.read()
@@ -193,16 +263,20 @@ async def import_recipes(
             )
 
         # Log the import (should use proper logging)
-        print(f"Importing {len(recipes_data)} recipes from {file.filename}")
+        logger.info("Importing %d recipes from %s for user %s", len(recipes_data), file.filename, current_user.username)
+
+        # Inject owner_id into imported recipes if they don't have it
+        for r_data in recipes_data:
+            if "owner_id" not in r_data or not r_data["owner_id"]:
+                r_data["owner_id"] = current_user.id
 
         # Actually import
         count = storage.import_recipes(recipes_data)
 
-        # Different success response format
         return {"message": f"Successfully imported {count} recipes", "count": count}
 
     except json.JSONDecodeError as e:
-        print(f"JSON error: {e}")
+        logger.warning("JSON error: %s", e)
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     except ValueError as e:
         # Schema validation error from storage
@@ -213,10 +287,19 @@ async def import_recipes(
 
 @router.get("/recipes/export")
 def export_recipes(
+    current_user: User = Depends(get_current_user),
     storage: RecipeStorageInterface = Depends(get_storage),
 ):
-    """Export all recipes as JSON"""
-    recipes = storage.get_all_recipes()
-    # Convert to dict for JSON serialization
-    recipes_dict = [recipe.dict() for recipe in recipes]
+    """Export all recipes belonging to the current user as JSON"""
+    recipes = storage.get_all_recipes(user_id=current_user.id)
+    # Filter to user's own recipes only, or include public ones?
+    # Export user's private recipes
+    user_recipes = [r for r in recipes if r.owner_id == current_user.id]
+    recipes_dict = [recipe.model_dump() for recipe in user_recipes]
+    # Format datetime fields to string
+    for r in recipes_dict:
+        if r.get("created_at"):
+            r["created_at"] = r["created_at"].isoformat()
+        if r.get("updated_at"):
+            r["updated_at"] = r["updated_at"].isoformat()
     return JSONResponse(content=recipes_dict)

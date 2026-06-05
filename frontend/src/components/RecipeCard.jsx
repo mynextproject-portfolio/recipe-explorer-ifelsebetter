@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tag, BookOpen, Globe } from 'lucide-react';
+import { Tag, BookOpen, Globe, Heart, Star } from 'lucide-react';
 
 const FALLBACK_GRADIENTS = [
   'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)',
@@ -11,7 +11,7 @@ const FALLBACK_GRADIENTS = [
 
 const FOOD_EMOJIS = ['🍳', '🥗', '🍲', '🍜', '🍝', '🍕', '🍰', '🌮', '🍔', '🍛'];
 
-export default function RecipeCard({ recipe, onClick }) {
+export default function RecipeCard({ recipe, onClick, onToggleFavorite }) {
   const isInternal = recipe.source === 'internal';
   
   // Deterministic fallback based on recipe ID or title
@@ -62,10 +62,34 @@ export default function RecipeCard({ recipe, onClick }) {
             </span>
           )}
         </div>
+
+        {/* Favorite Heart Toggle Overlay */}
+        <button 
+          className={`card-favorite-btn ${recipe.is_favorite ? 'active' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(recipe);
+          }}
+          aria-label="Toggle Favorite"
+        >
+          <Heart 
+            size={18} 
+            fill={recipe.is_favorite ? 'var(--color-error)' : 'none'} 
+            stroke={recipe.is_favorite ? 'var(--color-error)' : 'white'} 
+          />
+        </button>
       </div>
 
       <div className="recipe-card-content">
-        <h3 className="recipe-card-title">{recipe.title}</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+          <h3 className="recipe-card-title">{recipe.title}</h3>
+          {recipe.average_rating !== undefined && recipe.average_rating > 0 && (
+            <div className="recipe-card-rating">
+              <Star size={14} fill="gold" stroke="gold" />
+              <span>{recipe.average_rating}</span>
+            </div>
+          )}
+        </div>
         <p className="recipe-card-description">
           {recipe.description || 'A delicious recipe ready to cook.'}
         </p>

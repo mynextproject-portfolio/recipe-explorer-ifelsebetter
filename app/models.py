@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 import uuid
 
 # Constants
@@ -18,6 +18,7 @@ class Recipe(BaseModel):
     instructions: List[str]
     tags: List[str] = Field(default_factory=list)
     cuisine: str = Field(default="Global")
+    owner_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -38,3 +39,46 @@ class RecipeUpdate(BaseModel):
     instructions: List[str]
     tags: List[str]
     cuisine: str
+
+
+class User(BaseModel):
+    id: str
+    username: str
+    email: str
+    password_hash: str
+    profile_name: Optional[str] = None
+    preferences: dict = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+    profile_name: Optional[str] = None
+
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+
+class UserProfileUpdate(BaseModel):
+    profile_name: Optional[str] = None
+    preferences: Optional[dict] = None
+
+
+class Collection(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class CollectionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+

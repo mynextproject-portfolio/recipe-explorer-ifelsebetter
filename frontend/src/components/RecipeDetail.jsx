@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Edit, Trash2, Globe, Heart } from 'lucide-react';
+import { X, Plus, Edit, Trash2, Globe, Heart, Star, Bookmark } from 'lucide-react';
 
 const FALLBACK_GRADIENTS = [
   'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)',
@@ -11,10 +11,25 @@ const FALLBACK_GRADIENTS = [
 
 const FOOD_EMOJIS = ['🍳', '🥗', '🍲', '🍜', '🍝', '🍕', '🍰', '🌮', '🍔', '🍛'];
 
-export default function RecipeDetail({ recipe, onClose, onSaveExternal, onEdit, onDelete }) {
+export default function RecipeDetail({ 
+  recipe, 
+  onClose, 
+  onSaveExternal, 
+  onEdit, 
+  onDelete,
+  onToggleFavorite,
+  onRateRecipe,
+  collections = [],
+  onAddRecipeToCollection,
+  currentUser
+}) {
   const [checkedIngredients, setCheckedIngredients] = useState({});
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [selectedCollectionId, setSelectedCollectionId] = useState('');
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [showNewCollectionInput, setShowNewCollectionInput] = useState(false);
 
   if (!recipe) return null;
 
@@ -133,6 +148,123 @@ export default function RecipeDetail({ recipe, onClose, onSaveExternal, onEdit, 
             {recipe.description || 'No description provided.'}
           </p>
 
+          {/* Interactive Star Rating Widget */}
+          <div className="rating-widget-card">
+            <span className="rating-widget-title">Recipe Rating</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              <div className="stars-row">
+                {[1, 2, 3, 4, 5].map(star => (
+                  <button
+                    key={star}
+                    className="star-button"
+                    onMouseEnter={() => setHoverRating(star)}
+                    onMouseLeave={() => setHoverRating(0)}
+                    onClick={() => onRateRecipe(recipe.id, star)}
+                    aria-label={`Rate ${star} Stars`}
+                  >
+                    <Star 
+                      size={24} 
+                      className="star-icon"
+                      fill={star <= (hoverRating || recipe.user_rating || 0) ? 'gold' : 'none'} 
+                      stroke={star <= (hoverRating || recipe.user_rating || 0) ? 'gold' : 'var(--text-muted)'} 
+                    />
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                {recipe.average_rating > 0 ? (
+                  <span>
+                    Average: <strong>{recipe.average_rating}</strong> / 5.0 ({recipe.rating_count} {recipe.rating_count === 1 ? 'rating' : 'ratings'})
+                  </span>
+                ) : (
+                  <span>No ratings yet. Be the first to rate!</span>
+                )}
+                {recipe.user_rating && (
+                  <span style={{ display: 'block', color: 'var(--color-primary)', fontWeight: '600', fontSize: '0.75rem' }}>
+                    You rated: {recipe.user_rating} ⭐
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Personal Collections Section */}
+          <div className="collections-widget-card">
+            <span className="rating-widget-title" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <Bookmark size={16} /> Collections
+            </span>
+            <div style={{ marginTop: '0.5rem' }}>
+              {isInternal ? (
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {showNewCollectionInput ? (
+                    <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+                      <input 
+                        type="text" 
+                        placeholder="New collection name..." 
+                        className="collection-input-field" 
+                        value={newCollectionName} 
+                        onChange={(e) => setNewCollectionName(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && newCollectionName.trim()) {
+                            await onAddRecipeToCollection(recipe.id, null, newCollectionName.trim());
+                            setNewCollectionName('');
+                            setShowNewCollectionInput(false);
+                          }
+                        }}
+                      />
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)' }}
+                        onClick={async () => {
+                          if (newCollectionName.trim()) {
+                            await onAddRecipeToCollection(recipe.id, null, newCollectionName.trim());
+                            setNewCollectionName('');
+                            setShowNewCollectionInput(false);
+                          }
+                        }}
+                      >
+                        Create
+                      </button>
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)' }}
+                        onClick={() => setShowNewCollectionInput(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', width: '100%' }}>
+                      <select 
+                        className="collection-dropdown-select" 
+                        value={selectedCollectionId}
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          if (val === 'NEW') {
+                            setShowNewCollectionInput(true);
+                          } else if (val) {
+                            await onAddRecipeToCollection(recipe.id, val);
+                            setSelectedCollectionId('');
+                          }
+                        }}
+                      >
+                        <option value="">Add to a collection...</option>
+                        {collections.map(col => (
+                          <option key={col.id} value={col.id}>{col.name}</option>
+                        ))}
+                        <option value="NEW">+ Create New Collection...</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  Save this recipe to your database to organize it into collections.
+                </p>
+              )}
+            </div>
+          </div>
+
           <h3 className="detail-section-title">Ingredients Checklist</h3>
           {ingredients.length > 0 ? (
             <div className="ingredient-list">
@@ -168,6 +300,15 @@ export default function RecipeDetail({ recipe, onClose, onSaveExternal, onEdit, 
         </div>
 
         <div className="drawer-footer">
+          {/* Favorite heart toggle button */}
+          <button 
+            className={`btn ${recipe.is_favorite ? 'btn-danger' : 'btn-secondary'}`}
+            onClick={() => onToggleFavorite(recipe)}
+          >
+            <Heart size={16} fill={recipe.is_favorite ? 'white' : 'none'} />
+            {recipe.is_favorite ? 'Favorited' : 'Favorite'}
+          </button>
+
           {isInternal ? (
             <>
               <button 
@@ -176,7 +317,7 @@ export default function RecipeDetail({ recipe, onClose, onSaveExternal, onEdit, 
                   onEdit(recipe);
                 }}
               >
-                <Edit size={16} /> Edit Recipe
+                <Edit size={16} /> Edit
               </button>
               <button 
                 className="btn btn-danger" 
@@ -192,8 +333,8 @@ export default function RecipeDetail({ recipe, onClose, onSaveExternal, onEdit, 
               onClick={handleSave}
               disabled={saving}
             >
-              <Heart size={16} fill={saving ? 'white' : 'none'} /> 
-              {saving ? 'Saving...' : 'Save to Collection'}
+              <Plus size={16} /> 
+              {saving ? 'Saving...' : 'Save to Database'}
             </button>
           )}
           <button className="btn btn-secondary" onClick={onClose}>

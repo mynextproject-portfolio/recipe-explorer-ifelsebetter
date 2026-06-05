@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.routes import api, pages
-from app.routes import mealdb_routes
+from app.routes import mealdb_routes, auth_routes, collection_routes, interaction_routes
 from app.recipe_schema import get_schema
 from app.services.mealdb_adapter import MealDBAdapter
 from app.dependencies import get_storage
@@ -58,6 +58,9 @@ if react_dist.exists():
 # Include routers
 app.include_router(api.router)
 app.include_router(mealdb_routes.router)
+app.include_router(auth_routes.router)
+app.include_router(collection_routes.router)
+app.include_router(interaction_routes.router)
 app.include_router(pages.router)
 
 

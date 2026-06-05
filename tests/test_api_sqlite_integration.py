@@ -14,6 +14,19 @@ def sqlite_test_storage():
     
     storage = SQLiteRecipeStorage(db_path=path)
     
+    # Insert mock user so FOREIGN KEY constraint doesn't fail during test runs
+    import sqlite3
+    conn = sqlite3.connect(path)
+    # Insert test user
+    conn.execute(
+        """
+        INSERT INTO users (id, username, email, password_hash, profile_name, preferences, created_at, updated_at)
+        VALUES ('test-user-id', 'testuser', 'testuser@example.com', 'mock_hash', 'Test User', '{}', '2026-06-05T00:00:00', '2026-06-05T00:00:00')
+        """
+    )
+    conn.commit()
+    conn.close()
+    
     yield storage
     
     # Teardown
