@@ -1,11 +1,11 @@
 from typing import Optional
 from app.services.interfaces import RecipeStorageInterface, CacheInterface, MealDBAdapterInterface
-from app.services.storage import recipe_storage
+from app.services.sqlite_storage import SQLiteRecipeStorage
 from app.services.cache import RedisCache
 from app.services.mealdb_adapter import MealDBAdapter
 
 # Default singletons
-_storage: RecipeStorageInterface = recipe_storage
+_storage: RecipeStorageInterface = SQLiteRecipeStorage()
 _cache: CacheInterface = RedisCache()
 _mealdb_adapter: MealDBAdapterInterface = MealDBAdapter(cache=_cache)
 
