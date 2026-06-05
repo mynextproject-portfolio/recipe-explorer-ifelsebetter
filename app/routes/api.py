@@ -7,6 +7,7 @@ import time
 from app.models import RecipeCreate, RecipeUpdate
 from app.services.interfaces import RecipeStorageInterface, MealDBAdapterInterface
 from app.dependencies import get_storage, get_mealdb_adapter
+from app.services.metrics import recipe_search_total, recipe_search_terms_total
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,13 @@ async def search_recipes_unified(
 
     # Combine both result sets — internal first, then external
     all_results = internal_results + external_results
+
+    # --- Prometheus metrics ---
+    recipe_search_total.labels(source="internal").inc()
+    if external_results:
+        recipe_search_total.labels(source="external").inc()
+    if q and q.strip():
+        recipe_search_terms_total.labels(term=q.strip().lower()).inc()
 
     total_ms = (time.perf_counter() - t_start) * 1000.0
 

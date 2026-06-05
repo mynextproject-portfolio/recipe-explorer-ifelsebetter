@@ -22,6 +22,8 @@ from typing import Any, Optional
 
 import redis
 
+from app.services.metrics import cache_operations_total
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
@@ -71,9 +73,12 @@ class RedisCache(CacheInterface):
         try:
             raw = client.get(key)
             if raw is None:
+                cache_operations_total.labels(operation="miss").inc()
                 return None
+            cache_operations_total.labels(operation="hit").inc()
             return json.loads(raw)
         except (redis.RedisError, json.JSONDecodeError) as exc:
+            cache_operations_total.labels(operation="error").inc()
             logger.warning("Cache GET failed for key '%s': %s", key, exc)
             return None
 
@@ -85,8 +90,10 @@ class RedisCache(CacheInterface):
         ttl = ttl_seconds if ttl_seconds is not None else self._default_ttl
         try:
             client.setex(key, ttl, json.dumps(value))
+            cache_operations_total.labels(operation="set").inc()
             return True
         except (redis.RedisError, TypeError) as exc:
+            cache_operations_total.labels(operation="error").inc()
             logger.warning("Cache SET failed for key '%s': %s", key, exc)
             return False
 

@@ -9,6 +9,7 @@ from app.routes import mealdb_routes
 from app.recipe_schema import get_schema
 from app.services.mealdb_adapter import MealDBAdapter
 from app.dependencies import get_storage
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # App configuration
 APP_NAME = "Recipe Explorer"
@@ -53,6 +54,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(api.router)
 app.include_router(mealdb_routes.router)
 app.include_router(pages.router)
+
+# Prometheus auto-instrumentation: registers middleware for HTTP request
+# duration / count / in-progress metrics and exposes GET /metrics.
+# TODO(security): In production, restrict /metrics to internal network only.
+Instrumentator().instrument(app).expose(app)
 
 
 # Basic health check
