@@ -15,6 +15,7 @@ Error Handling Strategy:
 
 import logging
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -22,6 +23,10 @@ import httpx
 from app.recipe_schema import validate_recipe
 from jsonschema import ValidationError as JsonSchemaValidationError
 from app.services.interfaces import CacheInterface, MealDBAdapterInterface
+from app.services.metrics import (
+    mealdb_requests_total,
+    mealdb_request_duration_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,30 +70,39 @@ class MealDBAdapter(MealDBAdapterInterface):
                 return cached, True
 
         try:
+            t0 = time.monotonic()
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
                     f"{self.base_url}/search.php",
                     params={"s": name.strip()},
                 )
+            elapsed = time.monotonic() - t0
+            mealdb_request_duration_seconds.labels(endpoint="search").observe(elapsed)
 
             if response.status_code == 429:
                 logger.warning("TheMealDB rate limited (429). Returning empty results.")
+                mealdb_requests_total.labels(endpoint="search", status="rate_limited").inc()
                 return [], False
 
             response.raise_for_status()
             data = response.json()
+            mealdb_requests_total.labels(endpoint="search", status="success").inc()
 
         except httpx.TimeoutException:
             logger.warning("TheMealDB request timed out after %ss.", self.timeout)
+            mealdb_requests_total.labels(endpoint="search", status="timeout").inc()
             return [], False
         except httpx.HTTPStatusError as exc:
             logger.warning("TheMealDB HTTP error %s: %s", exc.response.status_code, exc)
+            mealdb_requests_total.labels(endpoint="search", status="error").inc()
             return [], False
         except httpx.RequestError as exc:
             logger.warning("TheMealDB network error: %s", exc)
+            mealdb_requests_total.labels(endpoint="search", status="error").inc()
             return [], False
         except ValueError:
             logger.error("TheMealDB returned invalid JSON.")
+            mealdb_requests_total.labels(endpoint="search", status="error").inc()
             return [], False
 
         results = self._parse_meals_response(data)
@@ -119,30 +133,39 @@ class MealDBAdapter(MealDBAdapterInterface):
                 return cached
 
         try:
+            t0 = time.monotonic()
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
                     f"{self.base_url}/lookup.php",
                     params={"i": meal_id.strip()},
                 )
+            elapsed = time.monotonic() - t0
+            mealdb_request_duration_seconds.labels(endpoint="lookup").observe(elapsed)
 
             if response.status_code == 429:
                 logger.warning("TheMealDB rate limited (429).")
+                mealdb_requests_total.labels(endpoint="lookup", status="rate_limited").inc()
                 return None
 
             response.raise_for_status()
             data = response.json()
+            mealdb_requests_total.labels(endpoint="lookup", status="success").inc()
 
         except httpx.TimeoutException:
             logger.warning("TheMealDB lookup timed out after %ss.", self.timeout)
+            mealdb_requests_total.labels(endpoint="lookup", status="timeout").inc()
             return None
         except httpx.HTTPStatusError as exc:
             logger.warning("TheMealDB HTTP error %s: %s", exc.response.status_code, exc)
+            mealdb_requests_total.labels(endpoint="lookup", status="error").inc()
             return None
         except httpx.RequestError as exc:
             logger.warning("TheMealDB network error: %s", exc)
+            mealdb_requests_total.labels(endpoint="lookup", status="error").inc()
             return None
         except ValueError:
             logger.error("TheMealDB returned invalid JSON for lookup.")
+            mealdb_requests_total.labels(endpoint="lookup", status="error").inc()
             return None
 
         meals = self._parse_meals_response(data)
