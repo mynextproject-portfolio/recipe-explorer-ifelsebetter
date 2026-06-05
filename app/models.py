@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uuid
 
 # Constants
@@ -81,4 +81,52 @@ class Collection(BaseModel):
 class CollectionCreate(BaseModel):
     name: str
     description: Optional[str] = None
+
+
+# --- V2 Enhanced Recipe Models ---
+
+class Nutrition(BaseModel):
+    calories: float
+    protein_g: float
+    fat_g: float
+    carbs_g: float
+
+
+class Difficulty(BaseModel):
+    level: str  # easy | medium | hard
+    prep_time_minutes: int
+    cook_time_minutes: int
+
+
+class Relationships(BaseModel):
+    substitutions: Dict[str, str] = Field(default_factory=dict)  # e.g., {"milk": "soy milk"}
+    variations: List[str] = Field(default_factory=list)  # list of recipe IDs
+
+
+class RecipeV2(Recipe):
+    nutrition: Optional[Nutrition] = None
+    dietary_restrictions: List[str] = Field(default_factory=list)
+    difficulty: Optional[Difficulty] = None
+    equipment: List[str] = Field(default_factory=list)
+    techniques: List[str] = Field(default_factory=list)
+    relationships: Optional[Relationships] = None
+
+
+class RecipeV2Create(RecipeCreate):
+    nutrition: Optional[Nutrition] = None
+    dietary_restrictions: List[str] = Field(default_factory=list)
+    difficulty: Optional[Difficulty] = None
+    equipment: List[str] = Field(default_factory=list)
+    techniques: List[str] = Field(default_factory=list)
+    relationships: Optional[Relationships] = None
+
+
+class RecipeV2Update(RecipeUpdate):
+    nutrition: Optional[Nutrition] = None
+    dietary_restrictions: List[str] = Field(default_factory=list)
+    difficulty: Optional[Difficulty] = None
+    equipment: List[str] = Field(default_factory=list)
+    techniques: List[str] = Field(default_factory=list)
+    relationships: Optional[Relationships] = None
+
 

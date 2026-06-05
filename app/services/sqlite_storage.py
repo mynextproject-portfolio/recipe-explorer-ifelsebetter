@@ -10,11 +10,13 @@ import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from app.models import (
     Recipe, RecipeCreate, RecipeUpdate,
-    User, UserCreate, Collection, CollectionCreate
+    User, UserCreate, Collection, CollectionCreate,
+    RecipeV2, RecipeV2Create, RecipeV2Update,
+    Nutrition, Difficulty, Relationships
 )
 from app.services.interfaces import RecipeStorageInterface
 
@@ -122,11 +124,23 @@ class SQLiteRecipeStorage(RecipeStorageInterface):
                 )
             """)
 
-            # Migration: add owner_id column to recipes table if it doesn't exist
+            # Migration: add owner_id and v2 columns to recipes table if they don't exist
             cursor = conn.execute("PRAGMA table_info(recipes)")
             columns = [row["name"] for row in cursor.fetchall()]
             if "owner_id" not in columns:
                 conn.execute("ALTER TABLE recipes ADD COLUMN owner_id TEXT REFERENCES users(id) ON DELETE SET NULL")
+            if "nutrition" not in columns:
+                conn.execute("ALTER TABLE recipes ADD COLUMN nutrition TEXT DEFAULT '{}'")
+            if "dietary_restrictions" not in columns:
+                conn.execute("ALTER TABLE recipes ADD COLUMN dietary_restrictions TEXT DEFAULT '[]'")
+            if "difficulty" not in columns:
+                conn.execute("ALTER TABLE recipes ADD COLUMN difficulty TEXT DEFAULT '{}'")
+            if "equipment" not in columns:
+                conn.execute("ALTER TABLE recipes ADD COLUMN equipment TEXT DEFAULT '[]'")
+            if "techniques" not in columns:
+                conn.execute("ALTER TABLE recipes ADD COLUMN techniques TEXT DEFAULT '[]'")
+            if "relationships" not in columns:
+                conn.execute("ALTER TABLE recipes ADD COLUMN relationships TEXT DEFAULT '{}'")
 
             conn.commit()
         finally:
@@ -683,6 +697,415 @@ class SQLiteRecipeStorage(RecipeStorageInterface):
                 (collection_id,),
             )
             return [self._row_to_recipe(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # --- V2 API Methods ---
+    def _row_to_recipe_v2(self, row: sqlite3.Row) -> RecipeV2:
+        """Convert a database row to a RecipeV2 model instance."""
+        row_keys = row.keys()
+        nutrition = None
+        if "nutrition" in row_keys and row["nutrition"]:
+            try:
+                nut_dict = json.loads(row["nutrition"])
+                if nut_dict:
+                    nutrition = Nutrition(**nut_dict)
+            except Exception:
+                pass
+
+        dietary_restrictions = []
+        if "dietary_restrictions" in row_keys and row["dietary_restrictions"]:
+            try:
+                dietary_restrictions = json.loads(row["dietary_restrictions"])
+            except Exception:
+                pass
+
+        difficulty = None
+        if "difficulty" in row_keys and row["difficulty"]:
+            try:
+                diff_dict = json.loads(row["difficulty"])
+                if diff_dict:
+                    difficulty = Difficulty(**diff_dict)
+            except Exception:
+                pass
+
+        equipment = []
+        if "equipment" in row_keys and row["equipment"]:
+            try:
+                equipment = json.loads(row["equipment"])
+            except Exception:
+                pass
+
+        techniques = []
+        if "techniques" in row_keys and row["techniques"]:
+            try:
+                techniques = json.loads(row["techniques"])
+            except Exception:
+                pass
+
+        relationships = None
+        if "relationships" in row_keys and row["relationships"]:
+            try:
+                rel_dict = json.loads(row["relationships"])
+                if rel_dict:
+                    relationships = Relationships(**rel_dict)
+            except Exception:
+                pass
+
+        return RecipeV2(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            ingredients=json.loads(row["ingredients"]),
+            instructions=json.loads(row["instructions"]),
+            tags=json.loads(row["tags"]),
+            cuisine=row["cuisine"],
+            owner_id=row["owner_id"] if "owner_id" in row_keys else None,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            nutrition=nutrition,
+            dietary_restrictions=dietary_restrictions,
+            difficulty=difficulty,
+            equipment=equipment,
+            techniques=techniques,
+            relationships=relationships,
+        )
+
+    def _build_v2_query(
+        self,
+        base_query: str,
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc",
+        additional_conditions: Optional[List[str]] = None,
+        additional_params: Optional[List[Any]] = None
+    ) -> Tuple[str, List[Any]]:
+        from typing import Any
+        conditions = []
+        params = []
+
+        if additional_conditions:
+            conditions.extend(additional_conditions)
+        if additional_params:
+            params.extend(additional_params)
+
+        if user_id:
+            conditions.append("(owner_id IS NULL OR owner_id = ?)")
+            params.append(user_id)
+
+        if difficulty:
+            conditions.append("json_extract(difficulty, '$.level') = ?")
+            params.append(difficulty)
+
+        if dietary:
+            conditions.append("exists (select 1 from json_each(dietary_restrictions) where value = ?)")
+            params.append(dietary)
+
+        if cuisine:
+            conditions.append("cuisine = ?")
+            params.append(cuisine)
+
+        query = base_query
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        # Sorting
+        if sort_by:
+            allowed_sorts = {
+                "title": "title",
+                "created_at": "created_at",
+                "updated_at": "updated_at",
+                "prep_time": "json_extract(difficulty, '$.prep_time_minutes')",
+                "cook_time": "json_extract(difficulty, '$.cook_time_minutes')",
+                "calories": "json_extract(nutrition, '$.calories')"
+            }
+            order_expr = allowed_sorts.get(sort_by, "created_at")
+            order = "DESC" if sort_order and sort_order.lower() == "desc" else "ASC"
+            query += f" ORDER BY {order_expr} {order}"
+        else:
+            query += " ORDER BY created_at DESC"
+
+        return query, params
+
+    def get_all_recipes_v2(
+        self, 
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc"
+    ) -> List[RecipeV2]:
+        """Retrieve all v2 recipes with optional filters and sorting."""
+        conn = self._get_connection()
+        try:
+            query, params = self._build_v2_query(
+                "SELECT * FROM recipes",
+                user_id=user_id,
+                difficulty=difficulty,
+                dietary=dietary,
+                cuisine=cuisine,
+                sort_by=sort_by,
+                sort_order=sort_order
+            )
+            cursor = conn.execute(query, params)
+            return [self._row_to_recipe_v2(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_recipe_v2(self, recipe_id: str) -> Optional[RecipeV2]:
+        """Retrieve a specific v2 recipe by its ID."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "SELECT * FROM recipes WHERE id = ?", (recipe_id,)
+            )
+            row = cursor.fetchone()
+            return self._row_to_recipe_v2(row) if row else None
+        finally:
+            conn.close()
+
+    def search_recipes_v2(
+        self, 
+        query: str, 
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc"
+    ) -> List[RecipeV2]:
+        """Search v2 recipes with query, optional filters, and sorting."""
+        if not query:
+            return self.get_all_recipes_v2(
+                user_id=user_id,
+                difficulty=difficulty,
+                dietary=dietary,
+                cuisine=cuisine,
+                sort_by=sort_by,
+                sort_order=sort_order
+            )
+
+        conn = self._get_connection()
+        try:
+            q_sql, params = self._build_v2_query(
+                "SELECT * FROM recipes",
+                user_id=user_id,
+                difficulty=difficulty,
+                dietary=dietary,
+                cuisine=cuisine,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                additional_conditions=["title LIKE ?"],
+                additional_params=[f"%{query}%"]
+            )
+            cursor = conn.execute(q_sql, params)
+            return [self._row_to_recipe_v2(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def create_recipe_v2(self, recipe_data: RecipeV2Create, owner_id: Optional[str] = None) -> RecipeV2:
+        """Create a new v2 recipe."""
+        recipe = RecipeV2(**recipe_data.model_dump())
+        recipe.owner_id = owner_id
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO recipes (id, title, description, ingredients,
+                                     instructions, tags, cuisine, owner_id,
+                                     created_at, updated_at,
+                                     nutrition, dietary_restrictions, difficulty,
+                                     equipment, techniques, relationships)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    recipe.id,
+                    recipe.title,
+                    recipe.description,
+                    json.dumps(recipe.ingredients),
+                    json.dumps(recipe.instructions),
+                    json.dumps(recipe.tags),
+                    recipe.cuisine,
+                    recipe.owner_id,
+                    recipe.created_at.isoformat(),
+                    recipe.updated_at.isoformat(),
+                    json.dumps(recipe.nutrition.model_dump() if recipe.nutrition else {}),
+                    json.dumps(recipe.dietary_restrictions),
+                    json.dumps(recipe.difficulty.model_dump() if recipe.difficulty else {}),
+                    json.dumps(recipe.equipment),
+                    json.dumps(recipe.techniques),
+                    json.dumps(recipe.relationships.model_dump() if recipe.relationships else {}),
+                ),
+            )
+            conn.commit()
+            return recipe
+        finally:
+            conn.close()
+
+    def update_recipe_v2(self, recipe_id: str, recipe_data: RecipeV2Update) -> Optional[RecipeV2]:
+        """Update an existing v2 recipe."""
+        existing = self.get_recipe_v2(recipe_id)
+        if existing is None:
+            return None
+
+        # Re-instantiate with merged values to validate and coerce dicts to Pydantic objects
+        merged = {**existing.model_dump(), **recipe_data.model_dump(exclude_unset=True)}
+        existing = RecipeV2.model_validate(merged)
+        existing.updated_at = datetime.now()
+
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """
+                UPDATE recipes
+                SET title = ?, description = ?, ingredients = ?,
+                    instructions = ?, tags = ?, cuisine = ?,
+                    updated_at = ?, nutrition = ?, dietary_restrictions = ?,
+                    difficulty = ?, equipment = ?, techniques = ?,
+                    relationships = ?
+                WHERE id = ?
+                """,
+                (
+                    existing.title,
+                    existing.description,
+                    json.dumps(existing.ingredients),
+                    json.dumps(existing.instructions),
+                    json.dumps(existing.tags),
+                    existing.cuisine,
+                    existing.updated_at.isoformat(),
+                    json.dumps(existing.nutrition.model_dump() if existing.nutrition else {}),
+                    json.dumps(existing.dietary_restrictions),
+                    json.dumps(existing.difficulty.model_dump() if existing.difficulty else {}),
+                    json.dumps(existing.equipment),
+                    json.dumps(existing.techniques),
+                    json.dumps(existing.relationships.model_dump() if existing.relationships else {}),
+                    recipe_id,
+                ),
+            )
+            conn.commit()
+            return existing
+        finally:
+            conn.close()
+
+    # --- Bulk Operations ---
+    def create_recipes_bulk(self, recipes_data: List[RecipeV2Create], owner_id: Optional[str] = None) -> List[RecipeV2]:
+        """Bulk create multiple v2 recipes."""
+        created_recipes = []
+        conn = self._get_connection()
+        try:
+            for data in recipes_data:
+                recipe = RecipeV2(**data.model_dump())
+                recipe.owner_id = owner_id
+                conn.execute(
+                    """
+                    INSERT INTO recipes (id, title, description, ingredients,
+                                         instructions, tags, cuisine, owner_id,
+                                         created_at, updated_at,
+                                         nutrition, dietary_restrictions, difficulty,
+                                         equipment, techniques, relationships)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        recipe.id,
+                        recipe.title,
+                        recipe.description,
+                        json.dumps(recipe.ingredients),
+                        json.dumps(recipe.instructions),
+                        json.dumps(recipe.tags),
+                        recipe.cuisine,
+                        recipe.owner_id,
+                        recipe.created_at.isoformat(),
+                        recipe.updated_at.isoformat(),
+                        json.dumps(recipe.nutrition.model_dump() if recipe.nutrition else {}),
+                        json.dumps(recipe.dietary_restrictions),
+                        json.dumps(recipe.difficulty.model_dump() if recipe.difficulty else {}),
+                        json.dumps(recipe.equipment),
+                        json.dumps(recipe.techniques),
+                        json.dumps(recipe.relationships.model_dump() if recipe.relationships else {}),
+                    ),
+                )
+                created_recipes.append(recipe)
+            conn.commit()
+            return created_recipes
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def update_recipes_bulk(self, updates: List[Tuple[str, RecipeV2Update]]) -> List[RecipeV2]:
+        """Bulk update multiple v2 recipes."""
+        updated_recipes = []
+        conn = self._get_connection()
+        try:
+            for recipe_id, recipe_data in updates:
+                cursor = conn.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError(f"Recipe with ID {recipe_id} not found")
+
+                existing = self._row_to_recipe_v2(row)
+                updated_data = recipe_data.model_dump()
+                for key, value in updated_data.items():
+                    setattr(existing, key, value)
+                existing.updated_at = datetime.now()
+
+                conn.execute(
+                    """
+                    UPDATE recipes
+                    SET title = ?, description = ?, ingredients = ?,
+                        instructions = ?, tags = ?, cuisine = ?,
+                        updated_at = ?, nutrition = ?, dietary_restrictions = ?,
+                        difficulty = ?, equipment = ?, techniques = ?,
+                        relationships = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        existing.title,
+                        existing.description,
+                        json.dumps(existing.ingredients),
+                        json.dumps(existing.instructions),
+                        json.dumps(existing.tags),
+                        existing.cuisine,
+                        existing.updated_at.isoformat(),
+                        json.dumps(existing.nutrition.model_dump() if existing.nutrition else {}),
+                        json.dumps(existing.dietary_restrictions),
+                        json.dumps(existing.difficulty.model_dump() if existing.difficulty else {}),
+                        json.dumps(existing.equipment),
+                        json.dumps(existing.techniques),
+                        json.dumps(existing.relationships.model_dump() if existing.relationships else {}),
+                        recipe_id,
+                    ),
+                )
+                updated_recipes.append(existing)
+            conn.commit()
+            return updated_recipes
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def delete_recipes_bulk(self, recipe_ids: List[str]) -> int:
+        """Bulk delete multiple recipes by ID. Returns count of deleted recipes."""
+        if not recipe_ids:
+            return 0
+        conn = self._get_connection()
+        try:
+            placeholders = ",".join("?" for _ in recipe_ids)
+            cursor = conn.execute(
+                f"DELETE FROM recipes WHERE id IN ({placeholders})",
+                recipe_ids
+            )
+            conn.commit()
+            return cursor.rowcount
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 

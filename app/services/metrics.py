@@ -64,3 +64,13 @@ auth_operations_total = Counter(
     ["action", "status"],  # action: register | login | logout | refresh, status: success | failure
 )
 
+# ---------------------------------------------------------------------------
+# API Version metrics
+# ---------------------------------------------------------------------------
+api_version_requests_total = Counter(
+    "api_version_requests_total",
+    "Track API requests by version and endpoint",
+    ["version", "endpoint"],  # version: v1 | v2, endpoint: standard path
+)
+
+

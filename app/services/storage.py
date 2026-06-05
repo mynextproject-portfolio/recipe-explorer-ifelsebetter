@@ -3,7 +3,9 @@ from datetime import datetime
 import uuid
 from app.models import (
     Recipe, RecipeCreate, RecipeUpdate,
-    User, UserCreate, Collection, CollectionCreate
+    User, UserCreate, Collection, CollectionCreate,
+    RecipeV2, RecipeV2Create, RecipeV2Update,
+    Nutrition, Difficulty, Relationships
 )
 
 # Global counter for analytics (can be used for analytics)
@@ -240,6 +242,168 @@ class RecipeStorage(RecipeStorageInterface):
     def get_collection_recipes(self, collection_id: str) -> List[Recipe]:
         rids = self.collection_recipes.get(collection_id, [])
         return [self.recipes[rid] for rid in rids if rid in self.recipes]
+
+    # --- V2 API Methods ---
+    def _upgrade_to_v2(self, r: Recipe) -> RecipeV2:
+        return RecipeV2(
+            id=r.id,
+            title=r.title,
+            description=r.description,
+            ingredients=r.ingredients,
+            instructions=r.instructions,
+            tags=r.tags,
+            cuisine=r.cuisine,
+            owner_id=r.owner_id,
+            created_at=r.created_at,
+            updated_at=r.updated_at,
+            nutrition=getattr(r, 'nutrition', None),
+            dietary_restrictions=getattr(r, 'dietary_restrictions', []),
+            difficulty=getattr(r, 'difficulty', None),
+            equipment=getattr(r, 'equipment', []),
+            techniques=getattr(r, 'techniques', []),
+            relationships=getattr(r, 'relationships', None),
+        )
+
+    def get_all_recipes_v2(
+        self, 
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc"
+    ) -> List[RecipeV2]:
+        """Retrieve all v2 recipes with optional filters and sorting."""
+        res = []
+        for r in self.recipes.values():
+            if user_id and r.owner_id is not None and r.owner_id != user_id:
+                continue
+            if difficulty:
+                if not hasattr(r, 'difficulty') or not r.difficulty or r.difficulty.level != difficulty:
+                    continue
+            if dietary:
+                if not hasattr(r, 'dietary_restrictions') or not r.dietary_restrictions or dietary not in r.dietary_restrictions:
+                    continue
+            if cuisine:
+                if r.cuisine != cuisine:
+                    continue
+            
+            if not isinstance(r, RecipeV2):
+                res.append(self._upgrade_to_v2(r))
+            else:
+                res.append(r)
+        
+        if sort_by:
+            def get_sort_key(recipe: RecipeV2):
+                if sort_by == "title":
+                    return recipe.title.lower()
+                elif sort_by == "created_at":
+                    return recipe.created_at
+                elif sort_by == "updated_at":
+                    return recipe.updated_at
+                elif sort_by == "prep_time":
+                    return recipe.difficulty.prep_time_minutes if recipe.difficulty else 0
+                elif sort_by == "cook_time":
+                    return recipe.difficulty.cook_time_minutes if recipe.difficulty else 0
+                elif sort_by == "calories":
+                    return recipe.nutrition.calories if recipe.nutrition else 0.0
+                return recipe.created_at
+            
+            reverse = (sort_order and sort_order.lower() == "desc")
+            res.sort(key=get_sort_key, reverse=reverse)
+        else:
+            res.sort(key=lambda x: x.created_at, reverse=True)
+            
+        return res
+
+    def get_recipe_v2(self, recipe_id: str) -> Optional[RecipeV2]:
+        """Retrieve a specific v2 recipe by its ID."""
+        r = self.recipes.get(recipe_id)
+        if r is None:
+            return None
+        if not isinstance(r, RecipeV2):
+            return self._upgrade_to_v2(r)
+        return r
+
+    def search_recipes_v2(
+        self, 
+        query: str, 
+        user_id: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        dietary: Optional[str] = None,
+        cuisine: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc"
+    ) -> List[RecipeV2]:
+        """Search v2 recipes with query, optional filters, and sorting."""
+        all_v2 = self.get_all_recipes_v2(
+            user_id=user_id,
+            difficulty=difficulty,
+            dietary=dietary,
+            cuisine=cuisine,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
+        if not query:
+            return all_v2
+        
+        query_lower = query.lower()
+        return [r for r in all_v2 if query_lower in r.title.lower()]
+
+    def create_recipe_v2(self, recipe_data: RecipeV2Create, owner_id: Optional[str] = None) -> RecipeV2:
+        """Create a new v2 recipe."""
+        recipe = RecipeV2.model_validate({**recipe_data.model_dump(), "owner_id": owner_id})
+        self.recipes[recipe.id] = recipe
+        return recipe
+
+    def update_recipe_v2(self, recipe_id: str, recipe_data: RecipeV2Update) -> Optional[RecipeV2]:
+        """Update an existing v2 recipe."""
+        if recipe_id not in self.recipes:
+            return None
+        r = self.recipes[recipe_id]
+        existing = r if isinstance(r, RecipeV2) else self._upgrade_to_v2(r)
+        
+        merged = {**existing.model_dump(), **recipe_data.model_dump(exclude_unset=True)}
+        existing = RecipeV2.model_validate(merged)
+        existing.updated_at = datetime.now()
+        
+        self.recipes[recipe_id] = existing
+        return existing
+
+
+    # --- Bulk Operations ---
+    def create_recipes_bulk(self, recipes_data: List[RecipeV2Create], owner_id: Optional[str] = None) -> List[RecipeV2]:
+        """Bulk create multiple v2 recipes."""
+        from typing import List
+        res = []
+        for d in recipes_data:
+            recipe = self.create_recipe_v2(d, owner_id)
+            res.append(recipe)
+        return res
+
+    def update_recipes_bulk(self, updates: List[Tuple[str, RecipeV2Update]]) -> List[RecipeV2]:
+        """Bulk update multiple v2 recipes."""
+        from typing import List, Tuple
+        res = []
+        for rid, _ in updates:
+            if rid not in self.recipes:
+                raise ValueError(f"Recipe with ID {rid} not found")
+        for rid, data in updates:
+            updated = self.update_recipe_v2(rid, data)
+            if updated:
+                res.append(updated)
+        return res
+
+    def delete_recipes_bulk(self, recipe_ids: List[str]) -> int:
+        """Bulk delete multiple recipes by ID. Returns count of deleted recipes."""
+        from typing import List
+        count = 0
+        for rid in recipe_ids:
+            if rid in self.recipes:
+                del self.recipes[rid]
+                count += 1
+        return count
+
 
 
 # Global storage instance (intentionally simple for refactoring)
